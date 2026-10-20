@@ -101,3 +101,26 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - **Bad-key run:** every keyed API failed with a clear message and no crash.
 - Wrote `tests/test_data.py` (offline, mocked): fallback order, an all-sources-down result, HTTP error mapping, key-leak checks, missing keys, and dropping the incomplete current month.
 - **Result:** `pytest`: 192 passed.
+- **Security catch:** the agent noticed an untracked `.env.txt` holding my real keys, which was not covered by `.gitignore`. It added an `.env.*` ignore rule (still allowing `.env.example`) and confirmed via `git log` that no key file was ever committed. It recommended that I delete `.env.txt`.
+
+### 7. Milestone 4 — App v1 (questionnaire, profile, allocation)
+**I asked:** go for milestone 4.
+
+**Agent did:**
+- Wrote `app.py` (UI only):
+  - **Disclaimer:** an "educational illustration, not advice" banner at the top.
+  - **Sidebar inputs:** age (changing it resets the horizon slider to 65 − age), a horizon slider, and five risk questions as radio buttons.
+  - **Profile metrics:** profile, score out of 30, and the growth/defensive split.
+  - **Explanation:** a "Why you landed here" sentence and an expandable score breakdown listing the scoring rules.
+  - **Allocation:** a table (your weight vs base weight), a sentence explaining the horizon tilt, and a Plotly donut with one fixed colour per ETF.
+- Wrote `tests/test_app.py`, which uses Streamlit's `AppTest` to run the real script headlessly. It checks:
+  - no exceptions and the disclaimer is visible
+  - age 25 → horizon 40, Moderate, 70%/30%
+  - age 60 → horizon 5, Conservative, 25%/75%
+  - the short-horizon cap is explained on screen
+- **Bug the tests caught:** the first version crashed because Plotly 7 rejects `hover_data` as a dict when `color` is also set. Fixed by switching to `custom_data`.
+- **Checked in the browser:**
+  - Changing age to 60 updated everything live.
+  - At narrow widths the weight columns were cut off, so the weights were moved next to the ticker and formatted to one decimal place.
+- Added `.streamlit/config.toml` to turn off Streamlit's usage statistics.
+- **Result:** `pytest`: 195 passed.

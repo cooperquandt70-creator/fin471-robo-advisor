@@ -21,3 +21,6 @@ data/cache/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local preview launcher for the Claude desktop app
+.claude/launch.json
