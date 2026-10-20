@@ -21,6 +21,15 @@ ETF_COLORS = {
     "BND": "#2e8b57", "BNDX": "#66bb6a", "TIP": "#a5d6a7", "BIL": "#9e9e9e",
 }
 
+# Shown in the "Limitations" section (expanded with full content in milestone 9).
+LIMITATIONS = [
+    "**Horizon is simplified.** The app uses the years until you *start* withdrawing money. In reality, "
+    "retirement spending is spread over many years after that date, so the true investment horizon is "
+    "longer than this input suggests. That is why the minimum is 1 year rather than 0, even at age 65 or older.",
+    "**The 10-year lookback is unusual.** It overweights an unusually strong decade for US stocks and "
+    "includes the 2022 bond drawdown. Expected returns are illustrative, not forecasts.",
+]
+
 DISCLAIMER = (
     "**Educational illustration only - not investment advice.** This tool was built for a "
     "university finance course. It does not know your full financial situation, taxes, or goals, "
@@ -43,8 +52,9 @@ def questionnaire() -> tuple[int, dict]:
     if "horizon" not in st.session_state:
         st.session_state.horizon = pr.default_horizon(st.session_state.age)
     horizon = st.sidebar.slider(
-        "Investment horizon (years)", pr.MIN_HORIZON, pr.MAX_HORIZON, key="horizon",
-        help="How many years until you expect to need this money. Defaults to years until age 65; adjust freely.",
+        "Years until you start withdrawing money", pr.MIN_HORIZON, pr.MAX_HORIZON, key="horizon",
+        help="Defaults to years until age 65 (minimum 1 year, so it is never zero at or past 65). "
+             "Adjust it if you plan to start withdrawing earlier or later.",
     )
 
     st.sidebar.header("2. Risk tolerance")
@@ -146,6 +156,10 @@ def main() -> None:
     show_profile(rec)
     st.divider()
     show_allocation(rec)
+
+    st.divider()
+    with st.expander("Limitations"):
+        st.markdown("\n".join(f"- {item}" for item in LIMITATIONS))
 
 
 main()

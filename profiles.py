@@ -117,7 +117,11 @@ GROWTH_FLOOR, GROWTH_CEILING = 0.20, 0.95
 # Scoring
 # ---------------------------------------------------------------------------
 def default_horizon(age: int) -> int:
-    """Default horizon = years until age 65, kept within 1-40 years."""
+    """Default horizon = years until age 65 (when withdrawals start), kept within 1-40 years.
+
+    At 65 or older this would be 0 or negative, so it is floored at 1 year.
+    (Spending in retirement actually continues for years; see Limitations in the app.)
+    """
     return int(min(max(RETIREMENT_AGE - age, MIN_HORIZON), MAX_HORIZON))
 
 

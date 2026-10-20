@@ -124,3 +124,17 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
   - At narrow widths the weight columns were cut off, so the weights were moved next to the ticker and formatted to one decimal place.
 - Added `.streamlit/config.toml` to turn off Streamlit's usage statistics.
 - **Result:** `pytest`: 195 passed.
+
+### 8. Pre-M5 fixes: horizon label, ages 65+, launch.json
+**I asked:**
+1. Relabel the horizon input to "Years until you start withdrawing money", and add a Limitations note that retirement spending extends the real horizon.
+2. Check ages 64, 65, 66 and 80: the horizon must never be 0 or negative, and the app must not error.
+3. Explain what `launch.json` is.
+
+**Agent did:**
+- Relabelled the slider and updated its help text.
+- Added a `LIMITATIONS` list and a Limitations expander to the app, with the retirement-spending note and the 10-year-lookback note.
+- Checked those ages: `default_horizon()` already floors at 1 year, so they all get 1 year → Conservative (21% growth). Documented the floor in the docstring.
+- Added tests: `test_profiles.py` (ages 64/65/66/80/90 → horizon 1, valid recommendation) and `test_app.py` (the same ages through the real UI with no errors, plus the new label and Limitations note).
+- **launch.json:** explained that `.claude/launch.json` only tells the Claude desktop app's browser pane how to start Streamlit. It isn't part of the project and stays git-ignored.
+- **Result:** `pytest`: 205 passed.

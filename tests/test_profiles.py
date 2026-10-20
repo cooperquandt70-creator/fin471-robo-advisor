@@ -32,6 +32,15 @@ def test_default_horizon():
     assert pr.default_horizon(18) == 40  # never above 40 years
 
 
+@pytest.mark.parametrize("age, horizon", [(64, 1), (65, 1), (66, 1), (80, 1), (90, 1)])
+def test_horizon_never_zero_or_negative_near_or_past_65(age, horizon):
+    h = pr.default_horizon(age)
+    assert h == horizon and h >= pr.MIN_HORIZON
+    rec = pr.recommend(h, MIDDLE)  # must not raise
+    assert rec.score.profile == "Conservative"  # under 3 years forces Conservative
+    assert sum(rec.weights.values()) == pytest.approx(1.0)
+
+
 def test_score_bounds():
     low = pr.score(1, LOWEST)
     high = pr.score(40, HIGHEST)

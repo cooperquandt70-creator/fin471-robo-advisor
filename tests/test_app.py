@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from streamlit.testing.v1 import AppTest
 
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
@@ -38,6 +39,20 @@ def test_age_change_resets_horizon_and_changes_recommendation():
     assert older.slider(key="horizon").value == 5
     assert metric(older, "Your profile") == "Conservative"
     assert metric(older, "Growth / defensive") == "25% / 75%"
+
+
+@pytest.mark.parametrize("age", [64, 65, 66, 80])
+def test_ages_at_or_past_65_never_give_zero_horizon(age):
+    at = run_app(age=age)  # run_app asserts no exception
+    assert at.slider(key="horizon").value == 1
+    assert metric(at, "Your profile") == "Conservative"
+    assert not at.error
+
+
+def test_horizon_label_and_limitations_note():
+    at = run_app()
+    assert at.slider(key="horizon").label == "Years until you start withdrawing money"
+    assert any("retirement spending" in m.value for m in at.markdown)
 
 
 def test_short_horizon_cap_is_explained():
