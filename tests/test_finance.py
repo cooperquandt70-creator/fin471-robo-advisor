@@ -103,6 +103,29 @@ def test_max_drawdown_never_falls_is_zero():
     assert fin.max_drawdown(pd.Series([100.0, 101.0, 105.0])) == pytest.approx(0.0)
 
 
+# --- Lookback window and summary --------------------------------------------
+def test_lookback_window_drops_incomplete_rows_then_takes_recent_years():
+    idx = pd.date_range("2020-01-31", periods=30, freq="ME")
+    r = pd.DataFrame({"A": 0.01, "B": 0.0}, index=idx)
+    r.iloc[:3, 1] = float("nan")  # B starts late (like BNDX)
+    assert len(fin.lookback_window(r, None)) == 27
+    assert len(fin.lookback_window(r, 2)) == 24
+    assert fin.lookback_window(r, 2).index[-1] == idx[-1]
+
+
+def test_portfolio_summary_hand_checked():
+    # A alternates +2%/0% (mean 1%/month), B is always 0.5%. 50/50.
+    r = pd.DataFrame({"A": [0.02, 0.0, 0.02, 0.0], "B": [0.005] * 4})
+    s = fin.portfolio_summary(r, [0.5, 0.5], risk_free=0.03)
+    assert s["expected_return"] == pytest.approx(0.5 * 0.12 + 0.5 * 0.06)  # 9%
+    # B has zero variance, so sigma_p = 0.5 * sigma_A
+    sigma_a = fin.annualized_volatility(r["A"])
+    assert s["volatility"] == pytest.approx(0.5 * sigma_a)
+    assert s["sharpe"] == pytest.approx((0.09 - 0.03) / (0.5 * sigma_a))
+    assert s["max_drawdown"] == pytest.approx(0.0)  # never falls
+    assert s["wealth"].iloc[-1] == pytest.approx(10_000 * 1.0125**2 * 1.0025**2)
+
+
 # --- Monte Carlo -----------------------------------------------------------
 def test_monte_carlo_zero_volatility_is_deterministic():
     # 12%/yr with no risk = 1% per month: 10,000 * 1.01^12 = 11,268.25

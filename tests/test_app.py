@@ -3,9 +3,29 @@
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+import data
+
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
+
+
+def _offline(*args, **kwargs):
+    raise data.ApiError("offline for tests")
+
+
+@pytest.fixture(autouse=True)
+def offline_data(monkeypatch, tmp_path):
+    """No network in tests: live sources fail, so the app falls back to the bundled sample."""
+    monkeypatch.setattr(data, "fetch_prices_yfinance", _offline)
+    monkeypatch.setattr(data, "fetch_prices_tiingo", _offline)
+    monkeypatch.setattr(data, "fetch_dtb3", _offline)
+    monkeypatch.setattr(data, "CACHE_PRICES", tmp_path / "prices.csv")  # ignore any local cache
+    monkeypatch.setattr(data, "CACHE_DTB3", tmp_path / "dtb3.csv")
+    st.cache_data.clear()
+    yield
+    st.cache_data.clear()
 
 
 def run_app(age=None, horizon=None):
@@ -53,6 +73,45 @@ def test_horizon_label_and_limitations_note():
     at = run_app()
     assert at.slider(key="horizon").label == "Years until you start withdrawing money"
     assert any("retirement spending" in m.value for m in at.markdown)
+
+
+def test_statistics_shown_from_snapshot_with_clear_source_badge():
+    at = run_app()
+    for label in ("Expected return (annual)", "Volatility (annual)", "Sharpe ratio", "Max drawdown"):
+        assert metric(at, label) not in ("", "nan%", "nan")
+    assert any("educational sample" in w.value for w in at.sidebar.warning)
+    assert any("120 monthly total returns" in c.value for c in at.caption)  # 10-year default
+
+
+def test_lookback_selector_changes_window():
+    at = run_app()
+    at.selectbox(key="lookback").set_value("5 years").run()
+    assert not at.exception
+    assert any("60 monthly total returns" in c.value for c in at.caption)
+
+
+def test_aggressive_has_higher_volatility_than_conservative():
+    def vol(age):
+        return float(metric(run_app(age=age), "Volatility (annual)").rstrip("%"))
+    assert vol(25) > vol(70)
+
+
+def test_all_price_sources_down_shows_error_not_crash(monkeypatch, tmp_path):
+    monkeypatch.setattr(data, "SNAPSHOT_PRICES", tmp_path / "missing.csv")
+    monkeypatch.setattr(data, "SNAPSHOT_DTB3", tmp_path / "missing_dtb3.csv")
+    at = run_app()  # asserts no exception
+    assert any("Historical prices are unavailable" in e.value for e in at.error)
+    assert metric(at, "Your profile")  # questionnaire results still shown
+    assert any("No price data available" in e.value for e in at.sidebar.error)
+
+
+def test_risk_free_down_asks_for_manual_rate(monkeypatch, tmp_path):
+    monkeypatch.setattr(data, "SNAPSHOT_DTB3", tmp_path / "missing_dtb3.csv")
+    at = run_app()
+    assert any("No risk-free rate data" in e.value for e in at.sidebar.error)
+    assert at.number_input(key="rf_manual").value == 4.0
+    assert metric(at, "Sharpe ratio") != "nan"
+    assert any("(4.00%)" in c.value for c in at.caption)
 
 
 def test_short_horizon_cap_is_explained():

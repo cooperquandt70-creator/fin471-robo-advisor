@@ -189,6 +189,43 @@ def percentile_bands(paths: np.ndarray, percentiles=(5, 25, 50, 75, 95)) -> pd.D
 
 
 # ---------------------------------------------------------------------------
+# 5. Putting it together
+# ---------------------------------------------------------------------------
+def lookback_window(returns: pd.DataFrame, years: int | None) -> pd.DataFrame:
+    """Keep only months where every ETF has data, then the most recent `years`.
+
+    years=None means "all common history".
+    """
+    common = returns.dropna(how="any")
+    if years is None:
+        return common
+    return common.iloc[-int(years * PERIODS_PER_YEAR):]
+
+
+def portfolio_summary(returns: pd.DataFrame, weights, risk_free: float, start_value: float = 10_000.0) -> dict:
+    """All headline statistics for one set of weights over one return window.
+
+    risk_free is an annual decimal (0.02 = 2%). Returns a dict so the app and
+    tests can read each number by name.
+    """
+    mu = annualized_return(returns)
+    vols = annualized_volatility(returns)
+    cov = annualized_covariance(returns)
+    exp_ret = portfolio_return(weights, mu)
+    vol = portfolio_volatility(weights, cov)
+    wealth = growth_of_investment(returns, weights, start_value)
+    return {
+        "expected_return": exp_ret,
+        "volatility": vol,
+        "naive_volatility": naive_weighted_volatility(weights, vols),
+        "sharpe": sharpe_ratio(exp_ret, vol, risk_free),
+        "cagr": cagr(wealth),
+        "max_drawdown": max_drawdown(wealth),
+        "wealth": wealth,
+    }
+
+
+# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 def _check_same_length(a: np.ndarray, b: np.ndarray) -> None:

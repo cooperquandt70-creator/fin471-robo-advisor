@@ -7,10 +7,14 @@ finance.py, and all API calls from data.py.
 Run with:  streamlit run app.py
 """
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
+import data
+import finance as fin
 import profiles as pr
 
 st.set_page_config(page_title="FIN471 Robo-Advisor", page_icon="📊", layout="wide")
@@ -29,6 +33,10 @@ LIMITATIONS = [
     "**The 10-year lookback is unusual.** It overweights an unusually strong decade for US stocks and "
     "includes the 2022 bond drawdown. Expected returns are illustrative, not forecasts.",
 ]
+
+PROFILE_COLORS = {"Conservative": "#2e8b57", "Moderate": "#e0a030", "Aggressive": "#8e6cc9"}
+LOOKBACKS = {"5 years": 5, "10 years": 10, "Max common history": None}
+MIN_MONTHS = 24  # fewer monthly returns than this makes the estimates unreliable
 
 DISCLAIMER = (
     "**Educational illustration only - not investment advice.** This tool was built for a "
@@ -65,6 +73,41 @@ def questionnaire() -> tuple[int, dict]:
                                   format_func=lambda i, labels=labels: labels[i], key=f"q_{q['key']}")
         answers[q["key"]] = q["options"][choice][1]
     return horizon, answers
+
+
+def analysis_settings() -> int | None:
+    st.sidebar.header("3. Analysis settings")
+    choice = st.sidebar.selectbox(
+        "Historical lookback", list(LOOKBACKS), index=1, key="lookback",
+        help="How many years of monthly returns are used to estimate return, volatility and correlation.",
+    )
+    return LOOKBACKS[choice]
+
+
+def show_source(label: str, result: data.DataResult) -> None:
+    """Sidebar badge showing where a dataset came from."""
+    text = f"**{label}:** {result.message}"
+    if result.source in ("live", "tiingo"):
+        st.sidebar.success(text)
+    elif result.source in ("cache", "snapshot"):
+        st.sidebar.warning(text)
+    else:
+        st.sidebar.error(text)
+
+
+def resolve_risk_free(rf_result: data.DataResult, window: pd.DataFrame) -> tuple[float, float]:
+    """Return (average rate over the lookback window, latest rate) as annual decimals.
+
+    If FRED and every fallback failed, ask the user for a rate instead of crashing.
+    """
+    series = rf_result.data
+    if series is None or len(series) == 0:
+        manual = st.sidebar.number_input("Risk-free rate to use (%)", 0.0, 15.0, 4.0, 0.25, key="rf_manual",
+                                         help="FRED data is unavailable, so enter a T-bill rate manually.")
+        return manual / 100, manual / 100
+    in_window = series.reindex(window.index).dropna()
+    average = in_window.mean() if len(in_window) else series.mean()
+    return float(average) / 100, float(series.iloc[-1]) / 100
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +180,103 @@ def show_allocation(rec: pr.Recommendation) -> None:
         st.plotly_chart(fig, width="stretch")
 
 
+def weights_vector(weights: dict) -> np.ndarray:
+    """Weights in the fixed TICKERS order used by the return columns."""
+    return np.array([weights[t] for t in pr.TICKERS])
+
+
+def show_statistics(rec: pr.Recommendation, window: pd.DataFrame, rf_avg: float, rf_now: float) -> None:
+    st.subheader("Expected return and risk (from historical data)")
+    first, last = window.index[0], window.index[-1]
+    st.caption(f"Based on {len(window)} monthly total returns, {first:%b %Y} to {last:%b %Y}. "
+               "Estimates are illustrative, not forecasts.")
+    if len(window) < MIN_MONTHS:
+        st.warning(f"Only {len(window)} months of data are available; these estimates are very noisy.")
+
+    w = weights_vector(rec.weights)
+    s = fin.portfolio_summary(window, w, rf_avg)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Expected return (annual)", f"{s['expected_return']:.1%}",
+              help="Weighted average of each ETF's annualized mean monthly return: w^T mu.")
+    c2.metric("Volatility (annual)", f"{s['volatility']:.1%}",
+              help="sqrt(w^T Sigma w) using the annualized covariance matrix.")
+    c3.metric("Sharpe ratio", f"{s['sharpe']:.2f}",
+              help="(Expected return - average T-bill rate) / volatility.")
+    c4, c5, c6 = st.columns(3)
+    c4.metric("Max drawdown", f"{s['max_drawdown']:.1%}", help="Worst peak-to-trough fall in the backtest.")
+    c5.metric("Backtest CAGR", f"{s['cagr']:.1%}", help="Compound annual growth rate actually achieved.")
+    c6.metric("$10,000 became", f"${s['wealth'].iloc[-1]:,.0f}")
+
+    benefit = s["naive_volatility"] - s["volatility"]
+    st.markdown(
+        f"**Diversification:** a simple weighted average of the ETFs' volatilities would be "
+        f"{s['naive_volatility']:.1%}. Using the covariance matrix gives {s['volatility']:.1%}: "
+        f"imperfect correlation lowers risk by **{benefit:.1%} points**."
+    )
+    st.caption(f"Sharpe uses the average 3-month T-bill rate over the same window ({rf_avg:.2%}). "
+               f"Current T-bill rate: {rf_now:.2%}.")
+
+    with st.expander("Per-ETF statistics"):
+        mu = fin.annualized_return(window)
+        vols = fin.annualized_volatility(window)
+        per_etf = pd.DataFrame({
+            "Ticker": pr.TICKERS,
+            "Your weight": w * 100,
+            "Expected return": mu[pr.TICKERS].to_numpy() * 100,
+            "Volatility": vols[pr.TICKERS].to_numpy() * 100,
+            "Sharpe": [(m - rf_avg) / v if v > 0 else np.nan for m, v in zip(mu[pr.TICKERS], vols[pr.TICKERS])],
+        })
+        pct = st.column_config.NumberColumn(format="%.1f%%")
+        st.dataframe(per_etf, hide_index=True, width="stretch",
+                     column_config={"Your weight": pct, "Expected return": pct, "Volatility": pct,
+                                    "Sharpe": st.column_config.NumberColumn(format="%.2f")})
+        st.caption("BIL (T-bills) has almost no volatility, so its Sharpe ratio is not meaningful.")
+
+    show_backtest(window, s["wealth"], rf_avg)
+
+
+def show_backtest(window: pd.DataFrame, wealth: pd.Series, rf_avg: float) -> None:
+    st.subheader("Historical backtest: growth of $10,000")
+    fig = go.Figure()
+    for name, base in pr.BASE_ALLOCATIONS.items():
+        base_wealth = fin.growth_of_investment(window, weights_vector(base))
+        fig.add_trace(go.Scatter(x=base_wealth.index, y=base_wealth, name=f"{name} (base)",
+                                 line=dict(color=PROFILE_COLORS[name], width=1.5, dash="dot")))
+    fig.add_trace(go.Scatter(x=wealth.index, y=wealth, name="Your portfolio",
+                             line=dict(color="#1f4e9c", width=3)))
+    fig.update_layout(yaxis_title="Portfolio value ($)", yaxis_tickprefix="$", yaxis_tickformat=",.0f",
+                      hovermode="x unified", margin=dict(t=10, b=10, l=10, r=10),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Rebalanced monthly to the target weights, dividends reinvested, no fees or taxes. "
+               "Dotted lines show the three base profiles for comparison.")
+
+
+def show_analysis(rec: pr.Recommendation, years: int | None) -> None:
+    """Load data (with fallbacks) and show statistics; never let a data problem crash the page."""
+    st.sidebar.header("Data sources")
+    prices_result = data.cached_prices(tuple(pr.TICKERS))
+    rf_result = data.cached_risk_free()
+    show_source("Prices", prices_result)
+    show_source("Risk-free rate", rf_result)
+
+    if prices_result.data is None:
+        st.error("Historical prices are unavailable, so return and risk statistics can't be shown. "
+                 "Your profile and allocation above are still valid. Details: " + prices_result.message)
+        return
+    try:
+        window = fin.lookback_window(fin.monthly_returns(prices_result.data[pr.TICKERS]), years)
+        if len(window) < 3:
+            st.error("Not enough overlapping monthly data to compute statistics.")
+            return
+        rf_avg, rf_now = resolve_risk_free(rf_result, window)
+        show_statistics(rec, window, rf_avg, rf_now)
+    except Exception as e:  # last line of defence: show a message, never a traceback
+        st.error(f"Something went wrong while computing statistics ({type(e).__name__}). "
+                 "Try another lookback, or reload the page.")
+
+
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
@@ -147,6 +287,7 @@ def main() -> None:
     st.info(DISCLAIMER)
 
     horizon, answers = questionnaire()
+    years = analysis_settings()
     try:
         rec = pr.recommend(horizon, answers)
     except ValueError as e:
@@ -156,6 +297,8 @@ def main() -> None:
     show_profile(rec)
     st.divider()
     show_allocation(rec)
+    st.divider()
+    show_analysis(rec, years)
 
     st.divider()
     with st.expander("Limitations"):

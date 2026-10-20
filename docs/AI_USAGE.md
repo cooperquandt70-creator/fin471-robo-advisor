@@ -138,3 +138,24 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - Added tests: `test_profiles.py` (ages 64/65/66/80/90 → horizon 1, valid recommendation) and `test_app.py` (the same ages through the real UI with no errors, plus the new label and Limitations note).
 - **launch.json:** explained that `.claude/launch.json` only tells the Claude desktop app's browser pane how to start Streamlit. It isn't part of the project and stays git-ignored.
 - **Result:** `pytest`: 205 passed.
+
+### 9. Milestone 5 — statistics, backtest, lookback, data badges
+**I asked:** go on milestone 5.
+
+**Agent did:**
+- **`finance.py`:** added `lookback_window()` (keeps only months where all 7 ETFs have data, then takes the last N years) and `portfolio_summary()` (expected return, covariance volatility, naive volatility, Sharpe, CAGR, max drawdown and the wealth path in one call). Added hand-checked tests for both.
+- **`app.py`:**
+  - **Sidebar:** a lookback selector (5 years, 10 years [default] or max common history) and data-source badges (green = live, yellow = saved copy or educational sample, red = unavailable).
+  - **Metrics:** expected return, volatility, Sharpe, max drawdown, backtest CAGR, and the final value of $10,000.
+  - **Explanations:** a diversification line comparing the naive weighted-average volatility with √(wᵀΣw), and a caption stating the average T-bill rate used for Sharpe and the current rate.
+  - **Charts and tables:** a per-ETF statistics table, and a growth-of-$10,000 chart showing my portfolio against the three base profiles.
+  - **Error handling:** if prices are unavailable the page shows a clear error and keeps the profile and allocation. If FRED and its fallbacks fail, a manual risk-free input appears. A last-resort `try/except` shows a message instead of a traceback.
+- **`tests/test_app.py`:** now runs fully offline (live sources forced to fail, so the bundled sample is used). New tests cover:
+  - statistics shown with an "educational sample" badge
+  - 120 months by default and 60 months for the 5-year lookback
+  - aggressive volatility higher than conservative
+  - all price sources down → error, no crash
+  - FRED down → manual rate of 4.00% used in Sharpe
+- **Live check in the browser** (Moderate with a +10 pp tilt, 70/30, 10 years, Oct 2016–Sep 2026): expected return 9.3%, volatility 11.2% (naive average 12.4%), Sharpe 0.61 (average T-bill rate 2.43%; current 3.94%), max drawdown −21.9%, CAGR 9.0%, and $10,000 grew to $23,671. Both badges were green (yfinance, FRED).
+- **Independent cross-check:** the standard deviation of the backtest's monthly portfolio returns × √12 = 0.112117, which equals √(wᵀΣw) = 0.112117. Likewise, 12 × the mean portfolio return equals wᵀμ (0.092746).
+- **Result:** `pytest`: 212 passed.
