@@ -1,0 +1,21 @@
+# Secrets: never commit real API keys
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local runtime caches (the committed snapshot lives in data/snapshot_prices.csv)
+data/cache/
+
+# Personal Claude Code permissions
+.claude/settings.local.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
