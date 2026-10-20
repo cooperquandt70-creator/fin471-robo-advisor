@@ -1,5 +1,7 @@
-# Secrets: never commit real API keys
+# Secrets: never commit real API keys (also catches copies like .env.txt, .env.local)
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
