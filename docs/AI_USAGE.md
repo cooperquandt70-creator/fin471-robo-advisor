@@ -78,3 +78,26 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
   - invalid inputs raising `ValueError`
   - **the required example:** a 25-year-old (middle answers) scores 20 → Moderate with a 70% growth share; a 60-year-old scores 12 → Conservative with a 25% growth share.
 - **Result:** `pytest`: 176 passed.
+
+### 6. Milestone 3 — `data.py`, API check, snapshot
+**I asked:** go (after I added my free keys to `.env`).
+
+**Agent did:**
+- Wrote `data.py`:
+  - **Price chain:** yfinance → Tiingo → last good local copy (`data/cache/`, git-ignored) → bundled educational sample.
+  - **Risk-free rate:** FRED DTB3, as monthly averages → local copy → sample.
+  - **Quotes:** Finnhub `/quote`.
+  - **Error handling:** every function returns a `DataResult(data, source, message)` instead of crashing. HTTP 401/403/429, timeouts, network errors and bad JSON become friendly messages that never contain an API key. Finnhub and Tiingo keys are sent in headers, not URLs.
+  - **Caching:** `st.cache_data` wrappers (24h for prices and FRED, 5 min for quotes).
+- Wrote `scripts/check_apis.py`, which reports OK/FAIL per API without printing keys. Its `--bad-key` mode tests error handling.
+- Wrote `scripts/build_snapshot.py`, which generates `data/snapshot_prices.csv` and `data/snapshot_dtb3.csv` with an "EDUCATIONAL SAMPLE" header.
+- **Live results with my keys (2026-10-20):**
+  - Finnhub `/quote` VTI: OK.
+  - Finnhub `/etf/profile` and `/stock/candle`: HTTP 403, which confirms the Step 0 finding that both are premium-only.
+  - FRED DTB3: OK (latest Sep 2026 = 3.94%).
+  - yfinance: OK (7 ETFs, Jan 2013–Sep 2026).
+  - Tiingo: OK.
+  - yfinance vs Tiingo 10-year monthly returns agree within 0.03% (VTI) and 0.23% (BND).
+- **Bad-key run:** every keyed API failed with a clear message and no crash.
+- Wrote `tests/test_data.py` (offline, mocked): fallback order, an all-sources-down result, HTTP error mapping, key-leak checks, missing keys, and dropping the incomplete current month.
+- **Result:** `pytest`: 192 passed.
