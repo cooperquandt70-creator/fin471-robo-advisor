@@ -127,6 +127,14 @@ def test_young_vs_near_retirement_get_meaningfully_different_allocations():
     assert pr.growth_share(young.weights) - pr.growth_share(older.weights) >= 0.40
 
 
+def test_young_but_lowest_risk_answers_stays_conservative_with_growth_tilt():
+    # Age 20, 40-yr horizon, lowest answer everywhere: 10 + 0 = 10 -> Conservative.
+    # Willingness to take risk dominates; the long horizon only tilts 30% -> 40% growth.
+    rec = pr.recommend(pr.default_horizon(20), LOWEST)
+    assert rec.score.total == 10 and rec.score.profile == "Conservative"
+    assert pr.growth_share(rec.weights) == pytest.approx(0.40)
+
+
 # --- Invalid input ---------------------------------------------------------
 @pytest.mark.parametrize("years", [0, 41, -5])
 def test_invalid_horizon_raises(years):

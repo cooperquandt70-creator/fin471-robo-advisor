@@ -159,3 +159,28 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - **Live check in the browser** (Moderate with a +10 pp tilt, 70/30, 10 years, Oct 2016–Sep 2026): expected return 9.3%, volatility 11.2% (naive average 12.4%), Sharpe 0.61 (average T-bill rate 2.43%; current 3.94%), max drawdown −21.9%, CAGR 9.0%, and $10,000 grew to $23,671. Both badges were green (yfinance, FRED).
 - **Independent cross-check:** the standard deviation of the backtest's monthly portfolio returns × √12 = 0.112117, which equals √(wᵀΣw) = 0.112117. Likewise, 12 × the mean portfolio return equals wᵀμ (0.092746).
 - **Result:** `pytest`: 212 passed.
+
+### 10. Milestone 6 — Monte Carlo, risk/return scatter, screenshot script
+**I asked:** go on M6 with a fixed seed, 10/50/90 bands, a nominal-returns note in Limitations, a user-set starting amount, and a test that median growth ≈ the geometric return. Also: show donut labels to one decimal, write `scripts/take_screenshots.py` with Playwright headless Chromium (my own screenshots have a Windows watermark), and report the profile for a 20-year-old with a 40-year horizon who picks the lowest-risk answer everywhere.
+
+**Agent did:**
+- **`finance.py`:**
+  - `percentile_bands()` now defaults to 10/50/90 (the plan said 5/25/50/75/95; updated `docs/PLAN.md`).
+  - Added `expected_geometric_return(mu, sigma) = exp(mu − sigma²/2) − 1` (volatility drag).
+  - Added `forward_expected_returns()`, which replaces BIL's historical return with the current T-bill rate.
+- **New tests:**
+  - With 20,000 seeded paths over 30 years at mu 8% and sigma 15%, the median's annual growth matches exp(mu − sigma²/2) − 1 ≈ 7.1% within 0.2 pp, and is clearly below the 8% arithmetic return.
+  - Volatility-drag formula and cash-replacement checks.
+- **`app.py`:**
+  - **Sidebar:** starting amount ($10,000 default) and an optional monthly contribution.
+  - **Monte Carlo fan chart:** 5,000 paths with fixed seed 42, a 10–90% band, the median, an amount-invested line, and p10/p50/p90 metrics. A caption explains the inputs and volatility drag.
+  - **Risk-vs-return scatter:** the 7 ETFs, the 3 base profiles and my portfolio (star).
+  - Donut labels now show one decimal, matching the table.
+  - Two new Limitations items: nominal dollars (not inflation-adjusted) and the normal-returns/fat-tails assumption.
+- **App tests:** p10 < median < p90; doubling the starting amount doubles the median (same seed); the horizon is used (age 60 → "5-year horizon"); cash uses today's T-bill rate; exactly 4 charts render.
+- **Screenshot tooling:** added `scripts/take_screenshots.py` and `requirements-dev.txt` (Playwright 1.64.0, kept out of the main requirements). The script starts its own headless Streamlit on a free port with the Deploy toolbar hidden, sets age 25 and age 60 like a user, and saves an overview plus 4 chart images per preset to `screenshots/` at 2× resolution.
+- **Bugs found by reviewing the screenshots:**
+  - The age-60 overview was scrolled to the bottom, because Streamlit scrolls an inner container rather than the window. The script now resets every scrolled element.
+  - The "Your portfolio" star covered the Conservative label, and the TIP and BND labels overlapped. Labels were moved.
+- **Answer to my question:** a 20-year-old with a 40-year horizon and the lowest answer everywhere scores 10/30 (10 horizon + 0 risk) → **Conservative**. The +10 pp horizon tilt raises growth from 30% to 40%. Added this as a test in `test_profiles.py`.
+- **Result:** `pytest`: 219 passed.

@@ -96,6 +96,33 @@ def test_aggressive_has_higher_volatility_than_conservative():
     assert vol(25) > vol(70)
 
 
+def test_monte_carlo_bands_and_starting_amount():
+    at = run_app()
+    low = int(metric(at, "Median").strip("$").replace(",", ""))
+    p10 = int(next(m.value for m in at.metric if m.label.startswith("Bad case")).strip("$").replace(",", ""))
+    p90 = int(metric(at, "Good case (90th pct.)").strip("$").replace(",", ""))
+    assert p10 < low < p90
+
+    at.number_input(key="start_amount").set_value(20_000).run()
+    assert not at.exception
+    doubled = int(metric(at, "Median").strip("$").replace(",", ""))
+    # Same seed, no contributions: doubling the start doubles every path.
+    assert doubled == pytest.approx(2 * low, abs=2)
+    assert any("nominal" in m.value for m in at.markdown)  # Limitations note
+
+
+def test_monte_carlo_uses_horizon_and_cash_at_current_rate():
+    at = run_app(age=60)  # horizon 5 years
+    assert any("5-year horizon" in s.value for s in at.subheader)
+    assert any("today's T-bill rate" in c.value for c in at.caption)
+
+
+def test_four_charts_rendered():
+    at = run_app()
+    charts = at.get("plotly_chart")
+    assert len(charts) == 4  # donut, backtest, Monte Carlo, risk/return
+
+
 def test_all_price_sources_down_shows_error_not_crash(monkeypatch, tmp_path):
     monkeypatch.setattr(data, "SNAPSHOT_PRICES", tmp_path / "missing.csv")
     monkeypatch.setattr(data, "SNAPSHOT_DTB3", tmp_path / "missing_dtb3.csv")

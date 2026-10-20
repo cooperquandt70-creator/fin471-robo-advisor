@@ -1,0 +1,4 @@
+# Optional developer tools (not needed to run the app).
+# After installing, also run:  python -m playwright install chromium
+-r requirements.txt
+playwright==1.64.0

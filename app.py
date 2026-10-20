@@ -32,6 +32,11 @@ LIMITATIONS = [
     "longer than this input suggests. That is why the minimum is 1 year rather than 0, even at age 65 or older.",
     "**The 10-year lookback is unusual.** It overweights an unusually strong decade for US stocks and "
     "includes the 2022 bond drawdown. Expected returns are illustrative, not forecasts.",
+    "**Projections are in nominal dollars.** Monte Carlo values are not adjusted for inflation: at 2.5% "
+    "inflation, $1 thirty years from now buys only about 48 cents of today's goods.",
+    "**The Monte Carlo assumes normal, independent monthly returns** with the historical mean and "
+    "covariance. Real markets have fatter tails (crashes are more likely than a normal curve predicts), "
+    "and future averages may differ from the past decade's.",
 ]
 
 PROFILE_COLORS = {"Conservative": "#2e8b57", "Moderate": "#e0a030", "Aggressive": "#8e6cc9"}
@@ -75,13 +80,21 @@ def questionnaire() -> tuple[int, dict]:
     return horizon, answers
 
 
-def analysis_settings() -> int | None:
+def analysis_settings() -> dict:
     st.sidebar.header("3. Analysis settings")
     choice = st.sidebar.selectbox(
         "Historical lookback", list(LOOKBACKS), index=1, key="lookback",
         help="How many years of monthly returns are used to estimate return, volatility and correlation.",
     )
-    return LOOKBACKS[choice]
+    start = st.sidebar.number_input(
+        "Starting amount ($)", min_value=100, max_value=10_000_000, value=10_000, step=1_000, key="start_amount",
+        help="Amount invested today in the Monte Carlo projection.",
+    )
+    contribution = st.sidebar.number_input(
+        "Monthly contribution ($)", min_value=0, max_value=100_000, value=0, step=100, key="contribution",
+        help="Added at the end of every month in the projection (optional).",
+    )
+    return {"years": LOOKBACKS[choice], "start": float(start), "contribution": float(contribution)}
 
 
 def show_source(label: str, result: data.DataResult) -> None:
@@ -173,8 +186,9 @@ def show_allocation(rec: pr.Recommendation) -> None:
         fig = px.pie(chart_data, names="Ticker", values="Your weight", hole=0.55,
                      color="Ticker", color_discrete_map=ETF_COLORS,
                      custom_data=["Asset class"])
-        fig.update_traces(textinfo="label+percent", sort=False,
-                          hovertemplate="%{label}: %{percent}<br>%{customdata[0]}<extra></extra>")
+        # One decimal place, matching the table.
+        fig.update_traces(texttemplate="%{label}<br>%{percent:.1%}", sort=False,
+                          hovertemplate="%{label}: %{percent:.1%}<br>%{customdata[0]}<extra></extra>")
         fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), showlegend=False,
                           annotations=[dict(text=rec.score.profile, showarrow=False, font_size=16)])
         st.plotly_chart(fig, width="stretch")
@@ -253,7 +267,87 @@ def show_backtest(window: pd.DataFrame, wealth: pd.Series, rf_avg: float) -> Non
                "Dotted lines show the three base profiles for comparison.")
 
 
-def show_analysis(rec: pr.Recommendation, years: int | None) -> None:
+MC_PATHS, MC_SEED = 5_000, 42
+
+
+def show_monte_carlo(rec: pr.Recommendation, window: pd.DataFrame, rf_now: float, settings: dict) -> None:
+    years = int(rec.score.horizon_years)
+    st.subheader(f"Monte Carlo projection over your {years}-year horizon")
+
+    w = weights_vector(rec.weights)
+    mu_forward = fin.forward_expected_returns(fin.annualized_return(window), pr.CASH_TICKER, rf_now)
+    exp_ret = fin.portfolio_return(w, mu_forward[pr.TICKERS])
+    vol = fin.portfolio_volatility(w, fin.annualized_covariance(window))
+    geo = fin.expected_geometric_return(exp_ret, vol)
+
+    paths = fin.monte_carlo_paths(exp_ret, vol, years, start_value=settings["start"],
+                                  monthly_contribution=settings["contribution"], n_paths=MC_PATHS, seed=MC_SEED)
+    bands = fin.percentile_bands(paths)  # p10 / p50 / p90
+    x = bands.index / fin.PERIODS_PER_YEAR
+    invested = settings["start"] + settings["contribution"] * years * fin.PERIODS_PER_YEAR
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x, y=bands["p90"], name="90th percentile (good case)",
+                             line=dict(color="#4a90d9", width=1)))
+    fig.add_trace(go.Scatter(x=x, y=bands["p10"], name="10th percentile (bad case)", fill="tonexty",
+                             fillcolor="rgba(74,144,217,0.2)", line=dict(color="#4a90d9", width=1)))
+    fig.add_trace(go.Scatter(x=x, y=bands["p50"], name="Median", line=dict(color="#1f4e9c", width=3)))
+    fig.add_trace(go.Scatter(x=[0, years], y=[settings["start"], invested], name="Amount invested",
+                             line=dict(color="#9e9e9e", dash="dash")))
+    fig.update_layout(xaxis_title="Years from today", yaxis_title="Portfolio value ($, nominal)",
+                      yaxis_tickprefix="$", yaxis_tickformat=",.0f", hovermode="x unified",
+                      margin=dict(t=10, b=10, l=10, r=10),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, traceorder="normal"))
+    st.plotly_chart(fig, width="stretch")
+
+    final = bands.iloc[-1]
+    c1, c2, c3 = st.columns(3)
+    c1.metric(f"Bad case (10th pct.) in {years} yrs", f"${final['p10']:,.0f}")
+    c2.metric("Median", f"${final['p50']:,.0f}")
+    c3.metric("Good case (90th pct.)", f"${final['p90']:,.0f}")
+    st.caption(
+        f"{MC_PATHS:,} simulated paths (fixed random seed {MC_SEED}, so results are reproducible). Each month's return "
+        f"is drawn from a normal distribution with mean {exp_ret:.1%}/12 and volatility {vol:.1%}/√12. "
+        f"The expected return uses the historical average for every ETF except BIL (cash), which uses today's "
+        f"T-bill rate ({rf_now:.2%}). Without contributions, the median grows at about {geo:.1%} a year: less than "
+        f"the {exp_ret:.1%} arithmetic expected return, because volatility drags down compound growth "
+        f"(≈ σ²/2). Values are nominal dollars, not adjusted for inflation."
+    )
+
+
+def show_risk_return(rec: pr.Recommendation, window: pd.DataFrame) -> None:
+    st.subheader("Risk vs. return: ETFs, profiles and your portfolio")
+    mu = fin.annualized_return(window)
+    vols = fin.annualized_volatility(window)
+    cov = fin.annualized_covariance(window)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=vols[pr.TICKERS] * 100, y=mu[pr.TICKERS] * 100, mode="markers+text",
+                             text=pr.TICKERS, name="Individual ETFs",
+                             # BND sits just under TIP, so put its label below the point.
+                             textposition=["bottom center" if t == "BND" else "top center" for t in pr.TICKERS],
+                             marker=dict(color="#9e9e9e", size=8)))
+    for name, base in pr.BASE_ALLOCATIONS.items():
+        w = weights_vector(base)
+        fig.add_trace(go.Scatter(x=[fin.portfolio_volatility(w, cov) * 100],
+                                 y=[fin.portfolio_return(w, mu[pr.TICKERS]) * 100],
+                                 mode="markers+text", text=[name], textposition="top center", name=name,
+                                 marker=dict(color=PROFILE_COLORS[name], size=14)))
+    w = weights_vector(rec.weights)
+    fig.add_trace(go.Scatter(x=[fin.portfolio_volatility(w, cov) * 100],
+                             y=[fin.portfolio_return(w, mu[pr.TICKERS]) * 100],
+                             mode="markers", name="Your portfolio",
+                             marker=dict(color="#1f4e9c", size=20, symbol="star", line=dict(color="white", width=1))))
+    fig.update_layout(xaxis_title="Volatility (annual %)", yaxis_title="Expected return (annual %)",
+                      xaxis_ticksuffix="%", yaxis_ticksuffix="%", margin=dict(t=10, b=10, l=10, r=10),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Profiles sit to the left of a straight line between bonds and stocks: combining assets that "
+               "aren't perfectly correlated gives less risk than the weighted average of their volatilities. "
+               "Historical estimates for this lookback window, not forecasts.")
+
+
+def show_analysis(rec: pr.Recommendation, settings: dict) -> None:
     """Load data (with fallbacks) and show statistics; never let a data problem crash the page."""
     st.sidebar.header("Data sources")
     prices_result = data.cached_prices(tuple(pr.TICKERS))
@@ -266,12 +360,16 @@ def show_analysis(rec: pr.Recommendation, years: int | None) -> None:
                  "Your profile and allocation above are still valid. Details: " + prices_result.message)
         return
     try:
-        window = fin.lookback_window(fin.monthly_returns(prices_result.data[pr.TICKERS]), years)
+        window = fin.lookback_window(fin.monthly_returns(prices_result.data[pr.TICKERS]), settings["years"])
         if len(window) < 3:
             st.error("Not enough overlapping monthly data to compute statistics.")
             return
         rf_avg, rf_now = resolve_risk_free(rf_result, window)
         show_statistics(rec, window, rf_avg, rf_now)
+        st.divider()
+        show_monte_carlo(rec, window, rf_now, settings)
+        st.divider()
+        show_risk_return(rec, window)
     except Exception as e:  # last line of defence: show a message, never a traceback
         st.error(f"Something went wrong while computing statistics ({type(e).__name__}). "
                  "Try another lookback, or reload the page.")
@@ -287,7 +385,7 @@ def main() -> None:
     st.info(DISCLAIMER)
 
     horizon, answers = questionnaire()
-    years = analysis_settings()
+    settings = analysis_settings()
     try:
         rec = pr.recommend(horizon, answers)
     except ValueError as e:
@@ -298,7 +396,7 @@ def main() -> None:
     st.divider()
     show_allocation(rec)
     st.divider()
-    show_analysis(rec, years)
+    show_analysis(rec, settings)
 
     st.divider()
     with st.expander("Limitations"):

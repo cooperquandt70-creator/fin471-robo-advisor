@@ -182,10 +182,37 @@ def monte_carlo_paths(
     return np.maximum(values, 0.0)
 
 
-def percentile_bands(paths: np.ndarray, percentiles=(5, 25, 50, 75, 95)) -> pd.DataFrame:
-    """Percentile of simulated value at each month (columns = percentiles)."""
+def percentile_bands(paths: np.ndarray, percentiles=(10, 50, 90)) -> pd.DataFrame:
+    """Percentile of simulated value at each month (columns = percentiles).
+
+    p10 = a bad outcome (only 10% of paths end lower), p50 = the median,
+    p90 = a good outcome (only 10% of paths end higher).
+    """
     bands = np.percentile(paths, percentiles, axis=0).T
     return pd.DataFrame(bands, columns=[f"p{p}" for p in percentiles])
+
+
+def expected_geometric_return(annual_return: float, annual_volatility: float) -> float:
+    """Growth rate of the MEDIAN outcome: exp(mu - sigma^2 / 2) - 1.
+
+    Compounding volatile returns grows money more slowly than the arithmetic
+    average suggests ("volatility drag" of about sigma^2 / 2 per year). Half of
+    the simulated paths end above (1 + g)^years and half below, so this is the
+    rate the Monte Carlo median should grow at.
+    """
+    return float(np.exp(annual_return - annual_volatility**2 / 2) - 1)
+
+
+def forward_expected_returns(mu: pd.Series, cash_ticker: str, cash_rate: float) -> pd.Series:
+    """Expected returns for the projection: historical mu, except cash.
+
+    Today's T-bill rate is a better forecast of next year's cash return than
+    the 10-year historical average, so the cash ETF uses `cash_rate` instead.
+    """
+    forward = mu.copy()
+    if cash_ticker in forward.index:
+        forward[cash_ticker] = cash_rate
+    return forward
 
 
 # ---------------------------------------------------------------------------

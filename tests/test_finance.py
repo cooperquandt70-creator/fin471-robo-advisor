@@ -145,5 +145,31 @@ def test_monte_carlo_seed_is_reproducible_and_bands_ordered():
     b = fin.monte_carlo_paths(0.07, 0.15, years=5, n_paths=500, seed=1)
     assert np.array_equal(a, b)
     bands = fin.percentile_bands(a)
+    assert list(bands.columns) == ["p10", "p50", "p90"]
     last = bands.iloc[-1]
-    assert last["p5"] < last["p25"] < last["p50"] < last["p75"] < last["p95"]
+    assert last["p10"] < last["p50"] < last["p90"]
+
+
+def test_expected_geometric_return_volatility_drag():
+    # mu 8%, sigma 15%: exp(0.08 - 0.01125) - 1 = 7.117%
+    assert fin.expected_geometric_return(0.08, 0.15) == pytest.approx(math.exp(0.06875) - 1)
+    assert fin.expected_geometric_return(0.08, 0.0) == pytest.approx(math.exp(0.08) - 1)
+
+
+def test_monte_carlo_median_grows_at_geometric_return():
+    # The median path's annual growth should match exp(mu - sigma^2/2) - 1,
+    # i.e. noticeably BELOW the 8% arithmetic expected return.
+    mu, sigma, years = 0.08, 0.15, 30
+    paths = fin.monte_carlo_paths(mu, sigma, years, start_value=10_000, n_paths=20_000, seed=7)
+    median_final = fin.percentile_bands(paths).iloc[-1]["p50"]
+    median_cagr = (median_final / 10_000) ** (1 / years) - 1
+    assert median_cagr == pytest.approx(fin.expected_geometric_return(mu, sigma), abs=0.002)
+    assert median_cagr < mu - 0.005
+
+
+def test_forward_expected_returns_replaces_only_cash():
+    mu = pd.Series({"VTI": 0.12, "BIL": 0.015})
+    fwd = fin.forward_expected_returns(mu, "BIL", 0.04)
+    assert fwd["BIL"] == pytest.approx(0.04)
+    assert fwd["VTI"] == pytest.approx(0.12)
+    assert mu["BIL"] == pytest.approx(0.015)  # original not modified
