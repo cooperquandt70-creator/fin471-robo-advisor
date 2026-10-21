@@ -102,9 +102,10 @@ Generated with `scripts/take_screenshots.py` (headless Chromium via Playwright) 
 
 ## Install and run
 
-Requires **Python 3.12 or newer**, because the pinned numpy 2.5.4 needs it (developed and tested with
-Python 3.12.10 on Windows 11). Check with `python --version`. On an older Python, `pip install` fails
-with "No matching distribution found for numpy".
+Requires **Python 3.12 or newer**, because the pinned numpy 2.5.4 needs it. A fresh clone of this
+repository was tested on Windows 11 with **Python 3.12.10, 3.13.16 and 3.14.8**: every pinned package
+installed, all tests passed and the app ran. Check your version with `python --version`. On an older
+Python, `pip install` fails with "No matching distribution found for numpy==2.5.4".
 
 **1. Get the code and create a virtual environment**
 
@@ -461,8 +462,8 @@ milestones that I reviewed, tested and approved one at a time. The full request-
 - The questionnaire's point values and cut-offs are reasoned judgment calls, not calibrated against
   real investor data.
 - A real yfinance rate limit can't be triggered on demand, so that path is tested with mocks only.
-- Developed and tested on Windows 11 with Python 3.12. The macOS/Linux commands above are standard
-  but untested.
+- Developed on Windows 11 with Python 3.12, and fresh-clone tested there on Python 3.12, 3.13 and 3.14.
+  The macOS/Linux commands above are standard but untested.
 
 ---
 

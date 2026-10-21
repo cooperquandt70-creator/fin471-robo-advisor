@@ -270,3 +270,33 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - **Screenshots:** `take_screenshots.py` now also captures `live_quotes.png`, and the crop was widened after the first capture cut off the caption. All screenshots regenerated.
 - **`README.md`:** full rewrite covering purpose, features, screenshots, install/run (venv, Windows and macOS/Linux commands, keys table, the "Email:" prompt), APIs and free-tier notes with links, the cross-check, allocations, scoring and tilt, formulas (with the 0.1118 example and volatility drag), project structure, testing, AI usage (factual list plus a TODO placeholder for me), and limitations/incomplete features.
 - **Caught while writing the README:** the pinned numpy 2.5.4 requires Python ≥ 3.12 (pandas and streamlit need ≥ 3.11). The draft said "3.10+"; corrected to 3.12+, with the pip error to expect.
+
+### 14. Milestone 10 — publish to GitHub and fresh-clone test
+**I asked:**
+- Add M10 to the plan.
+- Rewrite all commit emails to my GitHub noreply address before the first push, and verify.
+- Push to the empty public repo `cooperquandt70-creator/fin471-robo-advisor`, telling me what to do when git asks me to sign in.
+- Run a fresh-clone test following only the README, including installing on Python 3.13/3.14 (loosen any failing pin).
+- Don't touch the README's TODO block.
+
+**Agent did:**
+- **M10 in the plan:** added to `docs/PLAN.md`.
+- **Email rewrite:**
+  - Set the repo's `user.email` to the noreply address.
+  - Rewrote all 12 existing commits with `git filter-branch --env-filter` (author and committer).
+  - **Verified:** every commit uses only the noreply email; the file tree is byte-for-byte identical before and after; 0 occurrences of my Gmail in any pushable ref; backup ref deleted.
+- **Pre-push checks:** 34 tracked files, none of them `.env`, `.env.txt`, `.venv`, caches or local tool files. Scanned every file in every commit, and all commit messages, for my three real API key values (only counts printed, never the keys): 0 occurrences.
+- **Push:** renamed `master` → `main`, added the remote, and ran `git push -u origin main` in a visible terminal tab. Git Credential Manager opened GitHub's browser sign-in; I signed in and authorized it myself (the agent never handled credentials).
+- **Remote verified:** local and remote `main` hashes match; GitHub's commit API shows all 13 commits with one distinct email (the noreply address).
+- **Fresh-clone test** (cloned from GitHub into empty folders, following the README):
+  - **Python 3.14.8 and 3.13.16:** installed with `py install` (3.14 became the default `py`; the project's own `.venv` stays on 3.12). For both, `pip install -r requirements.txt` installed **every pinned version unchanged**, so no pins needed loosening, and **258 tests passed**.
+  - **App without keys:** yfinance prices plus the bundled T-bill sample, no exceptions, all 4 charts.
+  - **App with keys** (3.14 clone): every badge green. `check_apis.py` all OK, including both premium 403 confirmations.
+  - **Real `streamlit run`** from the 3.14 clone loaded in the browser: profile, live Finnhub quotes with a timestamp, all charts, no exception.
+  - **Activation:** this PC's PowerShell policy is RemoteSigned, so `Activate.ps1` works; the README's no-activation fallback covers stricter PCs.
+  - **Not reproducible here:** the Streamlit first-run "Email:" prompt, because this PC already answered it once.
+- **Gaps the fresh clone exposed, fixed:**
+  - With no keys, `check_apis.py` printed "FAIL … key is invalid" for the Finnhub premium checks. Missing optional keys now print **SKIP**, while `--bad-key` still FAILs clearly.
+  - The README now lists the tested Python versions (3.12.10, 3.13.16, 3.14.8) and the exact pip error to expect on older Python.
+- **Cleanup:** deleted the copy of my `.env` used for the with-keys clone test.
+- The README's AI-usage TODO block is untouched, for me to write.

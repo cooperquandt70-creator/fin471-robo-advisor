@@ -26,6 +26,11 @@ def report(name, ok, detail):
     print(f"[{'OK  ' if ok else 'FAIL'}] {name}: {detail}")
 
 
+def skip(name, key_name):
+    """A missing key isn't a failure (all keys are optional), so say so plainly."""
+    print(f"[SKIP] {name}: no {key_name} in .env (optional; the app works without it)")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bad-key", action="store_true", help="use deliberately invalid keys")
@@ -41,15 +46,21 @@ def main():
         print()
 
     # Finnhub /quote (free)
-    try:
-        q = data.fetch_quote("VTI", keys["FINNHUB_API_KEY"])
-        report("Finnhub /quote VTI", True, f"price {q['c']}, change {q.get('dp')}%")
-    except data.ApiError as e:
-        report("Finnhub /quote VTI", False, e)
+    if not keys["FINNHUB_API_KEY"]:
+        skip("Finnhub /quote VTI", "FINNHUB_API_KEY")
+    else:
+        try:
+            q = data.fetch_quote("VTI", keys["FINNHUB_API_KEY"])
+            report("Finnhub /quote VTI", True, f"price {q['c']}, change {q.get('dp')}%")
+        except data.ApiError as e:
+            report("Finnhub /quote VTI", False, e)
 
     # Finnhub premium endpoints: expected to be refused on the free tier (Step 0 check)
     for path, params in (("/etf/profile", {"symbol": "VTI"}),
                          ("/stock/candle", {"symbol": "VTI", "resolution": "D", "from": 1700000000, "to": 1700600000})):
+        if not keys["FINNHUB_API_KEY"]:
+            skip(f"Finnhub {path} (expected premium)", "FINNHUB_API_KEY")
+            continue
         try:
             data._get_json(data.FINNHUB_URL + path, "Finnhub", params=params,
                            headers={"X-Finnhub-Token": keys["FINNHUB_API_KEY"] or ""})
@@ -61,11 +72,14 @@ def main():
                    "HTTP 403: confirmed premium-only, as documented" if confirmed else e)
 
     # FRED DTB3
-    try:
-        s = data.fetch_dtb3(keys["FRED_API_KEY"])
-        report("FRED DTB3", True, f"{len(s)} months, latest {s.index[-1]:%Y-%m} = {s.iloc[-1]:.2f}%")
-    except data.ApiError as e:
-        report("FRED DTB3", False, e)
+    if not keys["FRED_API_KEY"]:
+        skip("FRED DTB3", "FRED_API_KEY")
+    else:
+        try:
+            s = data.fetch_dtb3(keys["FRED_API_KEY"])
+            report("FRED DTB3", True, f"{len(s)} months, latest {s.index[-1]:%Y-%m} = {s.iloc[-1]:.2f}%")
+        except data.ApiError as e:
+            report("FRED DTB3", False, e)
 
     # Prices: yfinance (no key; unaffected by --bad-key)
     try:
@@ -75,11 +89,14 @@ def main():
         report("yfinance prices", False, e)
 
     # Prices: Tiingo (one ticker only, to save the 50/hour free quota)
-    try:
-        p = data.fetch_prices_tiingo(["VTI"], keys["TIINGO_API_KEY"])
-        report("Tiingo prices VTI", True, f"{len(p)} months, {p.index[0]:%Y-%m} to {p.index[-1]:%Y-%m}")
-    except data.ApiError as e:
-        report("Tiingo prices VTI", False, e)
+    if not keys["TIINGO_API_KEY"]:
+        skip("Tiingo prices VTI", "TIINGO_API_KEY")
+    else:
+        try:
+            p = data.fetch_prices_tiingo(["VTI"], keys["TIINGO_API_KEY"])
+            report("Tiingo prices VTI", True, f"{len(p)} months, {p.index[0]:%Y-%m} to {p.index[-1]:%Y-%m}")
+        except data.ApiError as e:
+            report("Tiingo prices VTI", False, e)
 
     # Bundled sample
     try:

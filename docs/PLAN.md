@@ -132,6 +132,7 @@ fin471-robo-advisor/
   3. Rename the branch to `main`, add the remote https://github.com/cooperquandt70-creator/fin471-robo-advisor (public), and push. The user signs in to GitHub themselves.
   4. Fresh-clone test following only the README: clone into a new folder, then venv, install, `.env` from the example, pytest, `check_apis.py`, and run the app, with and without keys. Also install `requirements.txt` on the newest Python a classmate would download (3.14, and 3.13 if available); loosen any pin that fails and retest.
   5. Fix every README gap the fresh clone exposes, push again, and log everything in `docs/AI_USAGE.md`. The README's AI-usage TODO block stays for the user to write.
+  - **Status (2026-10-20): done.** All 13 commits use the noreply email (checked on GitHub). Fresh clones on Python 3.12, 3.13 and 3.14 installed every pinned package with no pin changes, passed 258 tests, and ran the app. Gaps fixed: `check_apis.py` now reports SKIP for missing optional keys, and the README lists the Python versions tested.
 
 ## Remaining risks and open items
 - **Snapshot CSV (approved):** commit `data/snapshot_prices.csv`, labeled "educational sample" in its header comment, in the README and in the UI badge. Also commit `scripts/build_snapshot.py`, which regenerates it from yfinance.
