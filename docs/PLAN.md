@@ -126,6 +126,13 @@ fin471-robo-advisor/
 - **M8 Robustness pass:** run with no .env, bad keys and no network (snapshot), check invalid inputs, and confirm nothing crashes.
 - **M9 Content:** Methodology & Assumptions and Limitations expanders, a top-of-page disclaimer, the Finnhub live quote panel, README (all required sections plus Step 0 notes), and screenshot placeholders.
 
+- **M10 Publish and verify** (added after M9 at the user's request):
+  1. Switch the commit email to the GitHub noreply address and rewrite all existing commits' author/committer email *before* the first push. Verify that every commit uses the noreply address and that the files are unchanged.
+  2. Pre-push checks: no `.env`, `.env.txt`, `.venv` or cache files tracked; no real API key values or personal email anywhere in history.
+  3. Rename the branch to `main`, add the remote https://github.com/cooperquandt70-creator/fin471-robo-advisor (public), and push. The user signs in to GitHub themselves.
+  4. Fresh-clone test following only the README: clone into a new folder, then venv, install, `.env` from the example, pytest, `check_apis.py`, and run the app, with and without keys. Also install `requirements.txt` on the newest Python a classmate would download (3.14, and 3.13 if available); loosen any pin that fails and retest.
+  5. Fix every README gap the fresh clone exposes, push again, and log everything in `docs/AI_USAGE.md`. The README's AI-usage TODO block stays for the user to write.
+
 ## Remaining risks and open items
 - **Snapshot CSV (approved):** commit `data/snapshot_prices.csv`, labeled "educational sample" in its header comment, in the README and in the UI badge. Also commit `scripts/build_snapshot.py`, which regenerates it from yfinance.
 - **yfinance breakage:** Yahoo changes can break it at any time. The fallbacks cover this, but your demo should be rehearsed with a warm cache.

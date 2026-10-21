@@ -109,7 +109,7 @@ with "No matching distribution found for numpy".
 **1. Get the code and create a virtual environment**
 
 ```bash
-git clone https://github.com/<your-username>/fin471-robo-advisor.git
+git clone https://github.com/cooperquandt70-creator/fin471-robo-advisor.git
 cd fin471-robo-advisor
 python -m venv .venv
 ```
