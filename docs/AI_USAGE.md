@@ -184,3 +184,37 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
   - The "Your portfolio" star covered the Conservative label, and the TIP and BND labels overlapped. Labels were moved.
 - **Answer to my question:** a 20-year-old with a 40-year horizon and the lowest answer everywhere scores 10/30 (10 horizon + 0 risk) → **Conservative**. The +10 pp horizon tilt raises growth from 30% to 40%. Added this as a test in `test_profiles.py`.
 - **Result:** `pytest`: 219 passed.
+
+### 11. Milestone 7 — manual override + return assumptions
+**I asked:**
+- Go on M7.
+- When weights are edited, label the portfolio "Custom"; reject negative weights; clearly warn when weights don't sum to 100% before normalizing.
+- Add a "Return assumptions" radio, Historical (default) or Conservative adjustment (−2.0 pts on equity ETFs, −0.5 on bond ETFs, cash unchanged). Apply it to expected return, Sharpe and Monte Carlo but not the backtest; show the amounts on screen; add it to Methodology; add a test.
+- Re-run `take_screenshots.py`.
+
+**Agent did:**
+- **`profiles.py`:**
+  - `ASSET_TYPE` (equity/bond/cash per ETF) and `CONSERVATIVE_ADJUSTMENT`.
+  - `return_adjustments()`.
+  - `check_custom_weights()` → ok / not_100 (with the total) / invalid (negative, empty or all zero).
+  - `normalize_weights()`.
+- **`finance.py`:** `adjust_expected_returns()`. `portfolio_summary()` takes optional `expected_returns`, which changes only expected return and Sharpe; volatility, backtest, CAGR and drawdown stay historical.
+- **`app.py` (restructured so every analysis section takes the weights in use plus a label):**
+  - **"Customize weights manually" toggle:** opens an editable weight table pre-filled with the recommendation. Negative entries are blocked by the column (min 0) and rejected again in code with a clear error.
+  - **Weights not totalling 100%:** a warning shows the total and pauses statistics; the app never silently normalizes. A "Normalize to 100%" button scales the weights, and "Reset to recommended" restores the questionnaire weights.
+  - **"Custom" label:** used on the donut centre, section titles and the backtest/scatter legends. The questionnaire profile stays in the top metric and in a "Recommended" comparison column.
+  - **"Return assumptions" radio:** when the adjustment is on, an info box lists the amounts and the exact drop for the current portfolio. The expected-return metric shows a "−x.xx pts vs historical" delta, and the per-ETF table shows historical return, adjustment and the return used. The adjustment flows into Sharpe, the scatter and the Monte Carlo, never the backtest.
+  - **New "Methodology & Assumptions" expander:** formulas plus the adjustment rule (full version in M9).
+- **Tests (236 pass):**
+  - **finance:** the adjustment lowers a 60/40 portfolio's expected return by exactly 1.4 pts and lowers Sharpe, while volatility, CAGR, drawdown and the wealth path are identical.
+  - **profiles:** adjustment amounts, weight validation and normalization.
+  - **app:**
+    - override is labelled Custom and the questionnaire result is kept
+    - 100% VTI raises volatility
+    - a negative weight is rejected and stats pause
+    - a 90% total warns and doesn't normalize until the button is clicked, then gives 50/50
+    - reset works
+    - the adjustment drops expected return by ≈1.54 pts for the 70/30 portfolio, lowers Sharpe and the MC median, and leaves CAGR, $10k, drawdown and volatility unchanged
+- **Browser check:** typing in the real grid produced a 158% total; the warning and pause appeared, and Normalize gave VTI 63.3% (100/158). **Layout fix:** buttons moved below the warning.
+- **Dev-server gotcha:** my already-running Streamlit server showed `AttributeError: profiles has no CONSERVATIVE_ADJUSTMENT` because it kept the old `profiles.py` in memory. Restarting the server fixes it; the code itself was fine.
+- Regenerated all screenshots with `scripts/take_screenshots.py`.

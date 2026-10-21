@@ -229,15 +229,29 @@ def lookback_window(returns: pd.DataFrame, years: int | None) -> pd.DataFrame:
     return common.iloc[-int(years * PERIODS_PER_YEAR):]
 
 
-def portfolio_summary(returns: pd.DataFrame, weights, risk_free: float, start_value: float = 10_000.0) -> dict:
+def adjust_expected_returns(mu: pd.Series, adjustments: dict) -> pd.Series:
+    """Add a per-asset adjustment to expected returns (e.g. -0.02 = 2 points lower).
+
+    Assets missing from `adjustments` are unchanged. The original is not modified.
+    """
+    return mu + pd.Series(adjustments, dtype=float).reindex(mu.index).fillna(0.0)
+
+
+def portfolio_summary(returns: pd.DataFrame, weights, risk_free: float, start_value: float = 10_000.0,
+                      expected_returns: pd.Series | None = None) -> dict:
     """All headline statistics for one set of weights over one return window.
 
-    risk_free is an annual decimal (0.02 = 2%). Returns a dict so the app and
-    tests can read each number by name.
+    risk_free is an annual decimal (0.02 = 2%). `expected_returns` optionally
+    replaces the historical mu for the FORWARD-LOOKING numbers (expected return
+    and Sharpe). Volatility, the backtest, CAGR and drawdown always use the
+    actual historical returns. Returns a dict so the app and tests can read each
+    number by name.
     """
     mu = annualized_return(returns)
     vols = annualized_volatility(returns)
     cov = annualized_covariance(returns)
+    if expected_returns is not None:
+        mu = expected_returns[returns.columns]
     exp_ret = portfolio_return(weights, mu)
     vol = portfolio_volatility(weights, cov)
     wealth = growth_of_investment(returns, weights, start_value)

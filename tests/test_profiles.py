@@ -135,6 +135,51 @@ def test_young_but_lowest_risk_answers_stays_conservative_with_growth_tilt():
     assert pr.growth_share(rec.weights) == pytest.approx(0.40)
 
 
+# --- Return assumptions ----------------------------------------------------
+def test_return_adjustments():
+    hist = pr.return_adjustments(conservative=False)
+    cons = pr.return_adjustments(conservative=True)
+    assert all(v == 0 for v in hist.values())
+    assert cons["VTI"] == cons["VXUS"] == cons["VNQ"] == pytest.approx(-0.02)
+    assert cons["BND"] == cons["BNDX"] == cons["TIP"] == pytest.approx(-0.005)
+    assert cons["BIL"] == 0.0
+    assert set(cons) == set(pr.TICKERS)
+
+
+# --- Custom weights --------------------------------------------------------
+PCT = {"VTI": 40, "VXUS": 20, "VNQ": 5, "BND": 20, "BNDX": 5, "TIP": 5, "BIL": 5}  # sums to 100
+
+
+def test_custom_weights_ok():
+    assert pr.check_custom_weights(PCT) == ("ok", "")
+    assert pr.check_custom_weights({**PCT, "BIL": 5.04})[0] == "ok"  # within tolerance
+
+
+def test_custom_weights_negative_rejected():
+    status, msg = pr.check_custom_weights({**PCT, "VTI": 50, "BIL": -5})
+    assert status == "invalid" and "BIL = -5.0%" in msg
+
+
+def test_custom_weights_not_100_warns_with_total():
+    status, msg = pr.check_custom_weights({**PCT, "VTI": 30})  # 90%
+    assert status == "not_100" and "90.0%" in msg
+
+
+@pytest.mark.parametrize("bad", [{**PCT, "TIP": None}, {**PCT, "TIP": float("nan")}, {t: 0 for t in PCT}])
+def test_custom_weights_missing_or_all_zero_invalid(bad):
+    assert pr.check_custom_weights(bad)[0] == "invalid"
+
+
+def test_normalize_weights():
+    w = pr.normalize_weights({"A": 30.0, "B": 30.0, "C": 0.0})
+    assert w == pytest.approx({"A": 0.5, "B": 0.5, "C": 0.0})
+    w90 = pr.normalize_weights({**PCT, "VTI": 30})
+    assert sum(w90.values()) == pytest.approx(1.0)
+    assert w90["VTI"] == pytest.approx(30 / 90)
+    with pytest.raises(ValueError):
+        pr.normalize_weights({"A": 0.0})
+
+
 # --- Invalid input ---------------------------------------------------------
 @pytest.mark.parametrize("years", [0, 41, -5])
 def test_invalid_horizon_raises(years):

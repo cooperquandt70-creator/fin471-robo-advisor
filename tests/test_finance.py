@@ -126,6 +126,31 @@ def test_portfolio_summary_hand_checked():
     assert s["wealth"].iloc[-1] == pytest.approx(10_000 * 1.0125**2 * 1.0025**2)
 
 
+def test_adjust_expected_returns():
+    mu = pd.Series({"EQ": 0.10, "BD": 0.04, "CASH": 0.03})
+    adj = fin.adjust_expected_returns(mu, {"EQ": -0.02, "BD": -0.005})
+    assert adj.to_dict() == pytest.approx({"EQ": 0.08, "BD": 0.035, "CASH": 0.03})
+    assert mu["EQ"] == pytest.approx(0.10)  # original unchanged
+
+
+def test_conservative_adjustment_changes_forward_stats_but_not_backtest():
+    # 60% equity / 40% bond. Adjusting equity -2 pts and bonds -0.5 pts should lower the
+    # expected return by exactly 0.6*0.02 + 0.4*0.005 = 1.4 points, change Sharpe
+    # accordingly, and leave volatility and every backtest number untouched.
+    r = pd.DataFrame({"EQ": [0.03, -0.01, 0.02, 0.00], "BD": [0.004, 0.002, 0.003, 0.001]})
+    w = [0.6, 0.4]
+    hist = fin.portfolio_summary(r, w, risk_free=0.02)
+    adjusted_mu = fin.adjust_expected_returns(fin.annualized_return(r), {"EQ": -0.02, "BD": -0.005})
+    adj = fin.portfolio_summary(r, w, risk_free=0.02, expected_returns=adjusted_mu)
+
+    assert hist["expected_return"] - adj["expected_return"] == pytest.approx(0.014)
+    assert adj["sharpe"] == pytest.approx((adj["expected_return"] - 0.02) / hist["volatility"])
+    assert adj["sharpe"] < hist["sharpe"]
+    for key in ("volatility", "cagr", "max_drawdown"):
+        assert adj[key] == pytest.approx(hist[key])
+    assert adj["wealth"].equals(hist["wealth"])
+
+
 # --- Monte Carlo -----------------------------------------------------------
 def test_monte_carlo_zero_volatility_is_deterministic():
     # 12%/yr with no risk = 1% per month: 10,000 * 1.01^12 = 11,268.25

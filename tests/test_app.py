@@ -123,6 +123,96 @@ def test_four_charts_rendered():
     assert len(charts) == 4  # donut, backtest, Monte Carlo, risk/return
 
 
+def money(at, label):
+    return int(metric(at, label).strip("$").replace(",", ""))
+
+
+def pct(at, label):
+    return float(metric(at, label).rstrip("%"))
+
+
+def custom(at, weights_pct):
+    """Turn on manual override and load specific weights into the editor."""
+    if not at.toggle(key="override").value:
+        at.toggle(key="override").set_value(True).run()
+    at.session_state["custom_pct"] = weights_pct
+    at.session_state["editor_version"] = at.session_state["editor_version"] + 1
+    at.run()
+    assert not at.exception, at.exception
+    return at
+
+
+ALL_VTI = {"VTI": 100.0, "VXUS": 0.0, "VNQ": 0.0, "BND": 0.0, "BNDX": 0.0, "TIP": 0.0, "BIL": 0.0}
+
+
+def test_override_on_starts_from_recommendation_and_is_labelled_custom():
+    at = run_app()
+    before = metric(at, "Volatility (annual)")
+    at.toggle(key="override").set_value(True).run()
+    assert not at.exception
+    assert any("Custom portfolio" in c.value for c in at.caption)
+    assert any("Custom portfolio" in s.value for s in at.subheader)  # "Expected return and risk: Custom portfolio"
+    assert not any("Moderate portfolio" in s.value for s in at.subheader)
+    assert metric(at, "Volatility (annual)") == before  # same weights, same stats
+    assert metric(at, "Your profile") == "Moderate"  # questionnaire result kept
+
+
+def test_custom_weights_change_statistics():
+    at = run_app()
+    rec_vol = pct(at, "Volatility (annual)")
+    custom(at, ALL_VTI)
+    assert pct(at, "Volatility (annual)") > rec_vol  # 100% stocks is riskier than 70/30
+
+
+def test_negative_weight_rejected():
+    at = custom(run_app(), {**ALL_VTI, "VTI": 105.0, "BIL": -5.0})
+    assert any("Negative weights" in e.value and "BIL = -5.0%" in e.value for e in at.error)
+    assert not [m for m in at.metric if m.label == "Volatility (annual)"]  # stats paused
+    assert any("paused" in i.value for i in at.info)
+
+
+def test_weights_not_100_warn_then_normalize():
+    at = custom(run_app(), {**ALL_VTI, "VTI": 45.0, "BND": 45.0})  # 90%
+    assert any("90.0%, not 100%" in w.value for w in at.warning)
+    assert not [m for m in at.metric if m.label == "Volatility (annual)"]  # not silently normalized
+
+    at.button(key="normalize").click().run()
+    assert not at.exception
+    assert not any("not 100%" in w.value for w in at.warning)
+    assert at.session_state["custom_pct"]["VTI"] == pytest.approx(50.0)
+    assert pct(at, "Volatility (annual)") > 0
+
+
+def test_reset_to_recommended():
+    at = custom(run_app(), ALL_VTI)
+    at.button(key="reset_weights").click().run()
+    assert at.session_state["custom_pct"]["VTI"] == pytest.approx(42.0)  # Moderate +10 tilt
+
+
+def test_conservative_adjustment_applies_to_forward_numbers_only():
+    at = run_app()
+    hist = {k: metric(at, k) for k in ("Expected return (annual)", "Sharpe ratio", "Backtest CAGR",
+                                        "$10,000 became", "Max drawdown", "Volatility (annual)", "Median")}
+    at.radio(key="return_assumption").set_value("Conservative adjustment").run()
+    assert not at.exception
+    adj = {k: metric(at, k) for k in hist}
+
+    # Moderate +10 tilt = 70% equity, 27% bonds, 3% cash -> -(0.70*2.0 + 0.27*0.5) = -1.535 points
+    drop = float(hist["Expected return (annual)"].rstrip("%")) - float(adj["Expected return (annual)"].rstrip("%"))
+    assert drop == pytest.approx(1.535, abs=0.1)  # displayed values are rounded to 0.1%
+    assert any("-1.53 pts" in m.delta or "-1.54 pts" in m.delta for m in at.metric if m.delta)
+    assert float(adj["Sharpe ratio"]) < float(hist["Sharpe ratio"])
+    assert money(at, "Median") < int(hist["Median"].strip("$").replace(",", ""))
+    for unchanged in ("Backtest CAGR", "$10,000 became", "Max drawdown", "Volatility (annual)"):
+        assert adj[unchanged] == hist[unchanged]
+    assert any("-2.0 points" in i.value and "-0.5 points" in i.value for i in at.info)
+
+
+def test_methodology_mentions_adjustment():
+    at = run_app()
+    assert any("Conservative adjustment" in m.value and "not** to the historical" in m.value for m in at.markdown)
+
+
 def test_all_price_sources_down_shows_error_not_crash(monkeypatch, tmp_path):
     monkeypatch.setattr(data, "SNAPSHOT_PRICES", tmp_path / "missing.csv")
     monkeypatch.setattr(data, "SNAPSHOT_DTB3", tmp_path / "missing_dtb3.csv")

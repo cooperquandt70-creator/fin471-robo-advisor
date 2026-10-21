@@ -38,6 +38,15 @@ CASH_TICKER = "BIL"
 
 PROFILES = ["Conservative", "Moderate", "Aggressive"]  # ordered least -> most risky
 
+# Asset type, used by the optional "Conservative adjustment" to return assumptions.
+ASSET_TYPE = {"VTI": "equity", "VXUS": "equity", "VNQ": "equity",
+              "BND": "bond", "BNDX": "bond", "TIP": "bond", "BIL": "cash"}
+
+# "Conservative adjustment": subtract these from historical annual expected returns,
+# because the lookback decade was unusually strong for stocks. Cash is unchanged
+# (its forward return already comes from today's T-bill rate).
+CONSERVATIVE_ADJUSTMENT = {"equity": -0.020, "bond": -0.005, "cash": 0.0}
+
 # Base weights (fractions). Each row sums to 1.
 BASE_ALLOCATIONS = {
     "Conservative": {"VTI": 0.18, "VXUS": 0.08, "VNQ": 0.04, "BND": 0.35, "BNDX": 0.10, "TIP": 0.15, "BIL": 0.10},
@@ -234,6 +243,59 @@ def apply_tilt(base: dict, tilt: float) -> dict:
         else:
             out[t] = w * (1 - new_g) / (1 - g) if g < 1 else (1 - new_g) / len(DEFENSIVE)
     return out
+
+
+def return_adjustments(conservative: bool) -> dict:
+    """Per-ticker change to annual expected return (decimals). All zero for 'Historical'."""
+    return {t: (CONSERVATIVE_ADJUSTMENT[ASSET_TYPE[t]] if conservative else 0.0) for t in TICKERS}
+
+
+# ---------------------------------------------------------------------------
+# Manual (custom) weights
+# ---------------------------------------------------------------------------
+SUM_TOLERANCE = 0.05  # percentage points; 99.96%-100.04% counts as 100%
+
+
+def check_custom_weights(weights_pct: dict) -> tuple[str, str]:
+    """Validate weights the user typed, in PERCENT (e.g. 42.0 = 42%).
+
+    Returns (status, message) where status is:
+      "ok"           - every weight is >= 0 and they sum to 100%
+      "not_100"      - valid, but the total isn't 100% (user must fix or normalize)
+      "invalid"      - a missing/negative weight or all zeros (can't be used at all)
+    """
+    values = {}
+    for t in TICKERS:
+        v = weights_pct.get(t)
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return "invalid", f"Every ETF needs a weight; {t} is empty (use 0 for none)."
+        if v != v:  # NaN check
+            return "invalid", f"Every ETF needs a weight; {t} is empty (use 0 for none)."
+        values[t] = v
+
+    negatives = [f"{t} = {v:.1f}%" for t, v in values.items() if v < 0]
+    if negatives:
+        return "invalid", ("Negative weights (short selling) aren't allowed: " + ", ".join(negatives) +
+                           ". Set them to 0 or more.")
+    total = sum(values.values())
+    if total <= 0:
+        return "invalid", "All weights are zero. Give at least one ETF a positive weight."
+    if abs(total - 100) > SUM_TOLERANCE:
+        return "not_100", f"Your weights add up to {total:.1f}%, not 100%."
+    return "ok", ""
+
+
+def normalize_weights(weights: dict) -> dict:
+    """Scale non-negative weights so they sum to 1 (keeps their relative sizes).
+
+    Example: {A: 30, B: 30} -> {A: 0.5, B: 0.5}.
+    """
+    total = sum(weights.values())
+    if total <= 0:
+        raise ValueError("Weights must have a positive total to normalize.")
+    return {t: w / total for t, w in weights.items()}
 
 
 @dataclass
