@@ -139,3 +139,15 @@ def test_month_end_drops_incomplete_current_month():
     monthly = data._to_month_end(pd.DataFrame({"VTI": [1.0, 2.0, 3.0]}, index=idx))
     assert len(monthly) == 2
     assert monthly.index[-1] < today
+
+
+def test_yfinance_rate_limit_gets_specific_message(monkeypatch):
+    import yfinance
+    from yfinance.exceptions import YFRateLimitError
+
+    def limited(*args, **kwargs):
+        raise YFRateLimitError()
+
+    monkeypatch.setattr(yfinance, "download", limited)
+    with pytest.raises(data.ApiError, match="rate limit"):
+        data.fetch_prices_yfinance(["VTI"])

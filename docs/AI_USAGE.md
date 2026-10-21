@@ -218,3 +218,36 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - **Browser check:** typing in the real grid produced a 158% total; the warning and pause appeared, and Normalize gave VTI 63.3% (100/158). **Layout fix:** buttons moved below the warning.
 - **Dev-server gotcha:** my already-running Streamlit server showed `AttributeError: profiles has no CONSERVATIVE_ADJUSTMENT` because it kept the old `profiles.py` in memory. Restarting the server fixes it; the code itself was fine.
 - Regenerated all screenshots with `scripts/take_screenshots.py`.
+
+### 12. Milestone 8 — number inputs + robustness pass
+**I asked:**
+- Replace the weight data editor with one `st.number_input` per ETF (0–100, step 1, two columns), keeping the sum warning, Normalize and Reset.
+- Robustness-test five cases:
+  1. 100% BIL (Sharpe must show "n/a" with a reason)
+  2. 100% in one ETF, and all weights 0
+  3. a 1-year Monte Carlo horizon
+  4. no `.env`, bad keys, no network, yfinance rate-limited
+  5. $0 contribution with a $10,000,000 start (readable axes)
+- Report the results in a table and add it to a README draft as a "Testing" section.
+
+**Agent did:**
+- **Number inputs:** seven inputs in two columns (min 0, max 100, step 1, shown to 1 decimal), plus a running total. New `profiles.normalize_to_percent()` rounds to one decimal and still totals exactly 100.0, so the rounded recommendation never trips the sum warning (e.g. 33.4/33.3/33.3). Normalize and Reset load values through session state.
+- **Sharpe guard:** `finance.MIN_VOLATILITY_FOR_SHARPE = 1%`; below that, `sharpe_ratio()` returns NaN. The app shows "n/a", a help tooltip and a caption explaining why. The per-ETF table shows BIL's Sharpe as n/a as well.
+- **Display fixes found during the pass:**
+  - 1-year grammar ("in 1 yr").
+  - Single-ETF diversification text ("none here").
+  - Monte Carlo y-axis switches to $ millions/billions for big amounts.
+  - Metrics use $12.3M / $1.23B: full numbers got cut off in narrow columns ("$92,117…" looked like $92 thousand).
+- **Data fixes found during the pass:**
+  - A yfinance rate limit now gets its own message.
+  - When the network is down, yfinance returns empty data instead of raising, so the badge said "possibly rate-limited". It now says "network problem or rate limit".
+  - Silenced yfinance's misleading "possibly delisted" console logging.
+  - The Tiingo-fallback badge explains why yfinance wasn't used.
+- **Real runs outside pytest** (`robust_check.py` in the agent's scratchpad):
+  - a project copy without `.env`
+  - invalid keys
+  - all traffic through a dead proxy (no network), once with a saved copy and once without, which reached the bundled sample
+  - All had no exceptions and showed all 4 charts. A real rate limit can't be triggered on demand, so that case is mocked.
+- **Browser check:** the two-column inputs and the $10M Monte Carlo ($0M–$500M axis; $92.1M / $208.1M / $485.8M metrics). Fixed the label "BIL (Cash-like (T-bills)), %" → "BIL (%) – Cash-like (T-bills)".
+- **Tests:** 18 new; total 254 pass, including one test per robustness case.
+- **`README.md` draft:** quick start plus a **Testing** section with the robustness table.

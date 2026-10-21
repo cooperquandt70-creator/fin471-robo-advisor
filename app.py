@@ -189,19 +189,31 @@ def show_profile(rec: pr.Recommendation) -> None:
 # ---------------------------------------------------------------------------
 # Manual override
 # ---------------------------------------------------------------------------
-def _set_custom(weights: dict, as_fraction: bool = True) -> None:
-    """Load weights into the editor (in percent) and force it to redraw with them."""
-    st.session_state.custom_pct = {t: round(weights[t] * (100 if as_fraction else 1), 2) for t in pr.TICKERS}
-    st.session_state.editor_version = st.session_state.get("editor_version", 0) + 1
+def _weight_key(ticker: str) -> str:
+    return f"w_{ticker}"
+
+
+def _load_weight_inputs(weights_pct: dict) -> None:
+    """Put percentages into the per-ETF number inputs (via their session-state keys)."""
+    for t in pr.TICKERS:
+        st.session_state[_weight_key(t)] = float(weights_pct[t])
+
+
+def _current_weight_inputs() -> dict:
+    return {t: st.session_state[_weight_key(t)] for t in pr.TICKERS}
 
 
 def _on_toggle(recommended: dict) -> None:
     if st.session_state.override:  # just switched on: start from the recommendation
-        _set_custom(recommended)
+        _load_weight_inputs(pr.normalize_to_percent(recommended))
 
 
-def _normalize(weights_pct: dict) -> None:
-    _set_custom(pr.normalize_weights(weights_pct))
+def _normalize() -> None:
+    _load_weight_inputs(pr.normalize_to_percent(_current_weight_inputs()))
+
+
+def _reset(recommended: dict) -> None:
+    _load_weight_inputs(pr.normalize_to_percent(recommended))
 
 
 def choose_weights(rec: pr.Recommendation) -> tuple[dict | None, str]:
@@ -211,20 +223,20 @@ def choose_weights(rec: pr.Recommendation) -> tuple[dict | None, str]:
     if not st.session_state.override:
         return rec.weights, rec.score.profile
 
-    if "custom_pct" not in st.session_state:
-        _set_custom(rec.weights)
-    start = pd.DataFrame({"Ticker": pr.TICKERS, "Weight (%)": [st.session_state.custom_pct[t] for t in pr.TICKERS]})
-    edited = st.data_editor(
-        start, key=f"weights_editor_{st.session_state.editor_version}", hide_index=True, num_rows="fixed",
-        disabled=["Ticker"], width="content",
-        column_config={"Weight (%)": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, step=0.1,
-                                                                   format="%.1f")},
-    )
-    weights_pct = dict(zip(edited["Ticker"], edited["Weight (%)"]))
+    if any(_weight_key(t) not in st.session_state for t in pr.TICKERS):
+        _load_weight_inputs(pr.normalize_to_percent(rec.weights))
+    # One input per ETF in two columns. min 0 means negative weights can't be entered;
+    # check_custom_weights() still rejects them as a second line of defence.
+    columns = st.columns(2)
+    for i, t in enumerate(pr.TICKERS):
+        columns[i % 2].number_input(f"{t} (%) – {pr.ETF_INFO[t][1]}", min_value=0.0, max_value=100.0,
+                                    step=1.0, format="%.1f", key=_weight_key(t))
+    weights_pct = _current_weight_inputs()
+    total = sum(weights_pct.values())
+    st.caption(f"Total: **{total:.1f}%** (must be 100%)")
     status, message = pr.check_custom_weights(weights_pct)
 
     if status == "not_100":
-        total = sum(weights_pct.values())
         example = 30 / total * 100
         st.warning(f"⚠️ **{message}** Statistics are paused until the weights total 100%. Fix the numbers, "
                    f"or click **Normalize to 100%** to scale every weight proportionally "
@@ -233,8 +245,8 @@ def choose_weights(rec: pr.Recommendation) -> tuple[dict | None, str]:
         st.error(f"⛔ {message} Statistics are paused until this is fixed.")
     left, right = st.columns(2)  # buttons below the message
     if status == "not_100":
-        left.button("Normalize to 100%", on_click=_normalize, args=(weights_pct,), key="normalize")
-    right.button("Reset to recommended", on_click=_set_custom, args=(rec.weights,), key="reset_weights")
+        left.button("Normalize to 100%", on_click=_normalize, key="normalize")
+    right.button("Reset to recommended", on_click=_reset, args=(rec.weights,), key="reset_weights")
 
     if status != "ok":
         return None, "Custom"
@@ -302,6 +314,31 @@ def weights_vector(weights: dict) -> np.ndarray:
     return np.array([weights[t] for t in pr.TICKERS])
 
 
+def fmt_money(value: float) -> str:
+    """$12,345 below a million, then $12.3M / $1.23B so metrics never get cut off mid-number."""
+    if value >= 1e9:
+        return f"${value / 1e9:,.2f}B"
+    if value >= 1e6:
+        return f"${value / 1e6:,.1f}M"
+    return f"${value:,.0f}"
+
+
+def _sharpe_text(value: float) -> str:
+    return "n/a" if np.isnan(value) else f"{value:.2f}"
+
+
+def money_scale(max_value: float) -> tuple[float, str, str, str]:
+    """Pick readable dollar units for a chart axis: (divisor, tick suffix, axis unit, number format).
+
+    $10,000,000 starting amounts would otherwise give long labels like $250,000,000.
+    """
+    if max_value >= 1e9:
+        return 1e9, "B", "$ billions", ",.1~f"
+    if max_value >= 1e6:
+        return 1e6, "M", "$ millions", ",.1~f"
+    return 1.0, "", "$", ",.0f"
+
+
 def show_statistics(weights: dict, label: str, window: pd.DataFrame, mu_expected: pd.Series,
                     rf_avg: float, rf_now: float, conservative: bool) -> None:
     st.subheader(f"Expected return and risk: {label} portfolio")
@@ -329,21 +366,30 @@ def show_statistics(weights: dict, label: str, window: pd.DataFrame, mu_expected
               help="Weighted average of each ETF's annualized mean monthly return: w^T mu.")
     c2.metric("Volatility (annual)", f"{s['volatility']:.1%}",
               help="sqrt(w^T Sigma w) using the annualized covariance matrix.")
-    c3.metric("Sharpe ratio", f"{s['sharpe']:.2f}",
-              help="(Expected return - average T-bill rate) / volatility.")
+    sharpe_na = np.isnan(s["sharpe"])
+    c3.metric("Sharpe ratio", "n/a" if sharpe_na else f"{s['sharpe']:.2f}",
+              help=(f"Not shown: volatility is below {fin.MIN_VOLATILITY_FOR_SHARPE:.0%}, so the ratio would divide "
+                    "by almost zero." if sharpe_na else "(Expected return - average T-bill rate) / volatility."))
     c4, c5, c6 = st.columns(3)
     c4.metric("Max drawdown", f"{s['max_drawdown']:.1%}", help="Worst peak-to-trough fall in the backtest.")
     c5.metric("Backtest CAGR", f"{s['cagr']:.1%}", help="Compound annual growth rate actually achieved.")
     c6.metric("$10,000 became", f"${s['wealth'].iloc[-1]:,.0f}")
 
     benefit = s["naive_volatility"] - s["volatility"]
-    st.markdown(
-        f"**Diversification:** a simple weighted average of the ETFs' volatilities would be "
-        f"{s['naive_volatility']:.1%}. Using the covariance matrix gives {s['volatility']:.1%}: "
-        f"imperfect correlation lowers risk by **{benefit:.1%} points**."
-    )
+    if benefit < 0.0005:  # e.g. 100% in one ETF
+        st.markdown(f"**Diversification:** none here. With everything in one ETF, portfolio volatility equals "
+                    f"that ETF's volatility ({s['volatility']:.1%}); mixing imperfectly correlated ETFs would lower it.")
+    else:
+        st.markdown(
+            f"**Diversification:** a simple weighted average of the ETFs' volatilities would be "
+            f"{s['naive_volatility']:.1%}. Using the covariance matrix gives {s['volatility']:.1%}: "
+            f"imperfect correlation lowers risk by **{benefit:.1%} points**."
+        )
+    sharpe_note = (f" **Sharpe ratio n/a:** portfolio volatility is only {s['volatility']:.2%} (below "
+                   f"{fin.MIN_VOLATILITY_FOR_SHARPE:.0%}), so dividing by it would give a huge, meaningless number."
+                   if sharpe_na else "")
     st.caption(f"Sharpe uses the average 3-month T-bill rate over the same window ({rf_avg:.2%}). "
-               f"Current T-bill rate: {rf_now:.2%}.")
+               f"Current T-bill rate: {rf_now:.2%}.{sharpe_note}")
 
     with st.expander("Per-ETF statistics"):
         vols = fin.annualized_volatility(window)
@@ -355,14 +401,16 @@ def show_statistics(weights: dict, label: str, window: pd.DataFrame, mu_expected
             "Adjustment": (exp - mu_hist[pr.TICKERS]).to_numpy() * 100,
             "Expected return used": exp.to_numpy() * 100,
             "Volatility": vols[pr.TICKERS].to_numpy() * 100,
-            "Sharpe": [(m - rf_avg) / v if v > 0 else np.nan for m, v in zip(exp, vols[pr.TICKERS])],
+            "Sharpe": [_sharpe_text(fin.sharpe_ratio(m, v, rf_avg, min_volatility=fin.MIN_VOLATILITY_FOR_SHARPE))
+                       for m, v in zip(exp, vols[pr.TICKERS])],
         })
         pct = st.column_config.NumberColumn(format="%.1f%%")
         st.dataframe(per_etf, hide_index=True, width="stretch",
                      column_config={"Your weight": pct, "Historical return": pct, "Expected return used": pct,
                                     "Adjustment": st.column_config.NumberColumn(format="%+.1f pts"),
-                                    "Volatility": pct, "Sharpe": st.column_config.NumberColumn(format="%.2f")})
-        st.caption("BIL (T-bills) has almost no volatility, so its Sharpe ratio is not meaningful.")
+                                    "Volatility": pct})
+        st.caption(f"Sharpe is n/a when volatility is below {fin.MIN_VOLATILITY_FOR_SHARPE:.0%} "
+                   "(BIL, T-bills): dividing by almost zero isn't meaningful.")
 
     show_backtest(window, s["wealth"], label)
 
@@ -400,25 +448,28 @@ def show_monte_carlo(weights: dict, label: str, years: int, window: pd.DataFrame
     x = bands.index / fin.PERIODS_PER_YEAR
     invested = settings["start"] + settings["contribution"] * years * fin.PERIODS_PER_YEAR
 
+    div, suffix, unit, num = money_scale(max(bands["p90"].max(), invested))
+    hover = f"$%{{y:{num}}}{suffix}"
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=x, y=bands["p90"], name="90th percentile (good case)",
+    fig.add_trace(go.Scatter(x=x, y=bands["p90"] / div, name="90th percentile (good case)", hovertemplate=hover,
                              line=dict(color="#4a90d9", width=1)))
-    fig.add_trace(go.Scatter(x=x, y=bands["p10"], name="10th percentile (bad case)", fill="tonexty",
-                             fillcolor="rgba(74,144,217,0.2)", line=dict(color="#4a90d9", width=1)))
-    fig.add_trace(go.Scatter(x=x, y=bands["p50"], name="Median", line=dict(color="#1f4e9c", width=3)))
-    fig.add_trace(go.Scatter(x=[0, years], y=[settings["start"], invested], name="Amount invested",
-                             line=dict(color="#9e9e9e", dash="dash")))
-    fig.update_layout(xaxis_title="Years from today", yaxis_title="Portfolio value ($, nominal)",
-                      yaxis_tickprefix="$", yaxis_tickformat=",.0f", hovermode="x unified",
-                      margin=dict(t=10, b=10, l=10, r=10),
+    fig.add_trace(go.Scatter(x=x, y=bands["p10"] / div, name="10th percentile (bad case)", fill="tonexty",
+                             hovertemplate=hover, fillcolor="rgba(74,144,217,0.2)", line=dict(color="#4a90d9", width=1)))
+    fig.add_trace(go.Scatter(x=x, y=bands["p50"] / div, name="Median", hovertemplate=hover,
+                             line=dict(color="#1f4e9c", width=3)))
+    fig.add_trace(go.Scatter(x=[0, years], y=[settings["start"] / div, invested / div], name="Amount invested",
+                             hovertemplate=hover, line=dict(color="#9e9e9e", dash="dash")))
+    fig.update_layout(xaxis_title="Years from today", yaxis_title=f"Portfolio value ({unit}, nominal)",
+                      yaxis_tickprefix="$", yaxis_ticksuffix=suffix, yaxis_tickformat=num, yaxis_rangemode="tozero",
+                      hovermode="x unified", margin=dict(t=10, b=10, l=10, r=10),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, traceorder="normal"))
     st.plotly_chart(fig, width="stretch")
 
     final = bands.iloc[-1]
     c1, c2, c3 = st.columns(3)
-    c1.metric(f"Bad case (10th pct.) in {years} yrs", f"${final['p10']:,.0f}")
-    c2.metric("Median", f"${final['p50']:,.0f}")
-    c3.metric("Good case (90th pct.)", f"${final['p90']:,.0f}")
+    c1.metric(f"Bad case (10th pct.) in {years} {'yr' if years == 1 else 'yrs'}", fmt_money(final["p10"]))
+    c2.metric("Median", fmt_money(final["p50"]))
+    c3.metric("Good case (90th pct.)", fmt_money(final["p90"]))
     basis = "historical average (with the Conservative adjustment)" if settings["conservative"] else "historical average"
     st.caption(
         f"{MC_PATHS:,} simulated paths (fixed random seed {MC_SEED}, so results are reproducible). Each month's return "

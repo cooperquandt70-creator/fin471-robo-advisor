@@ -88,12 +88,18 @@ def naive_weighted_volatility(weights, vols) -> float:
     return float(w @ v)
 
 
-def sharpe_ratio(expected_return: float, volatility: float, risk_free: float) -> float:
+# Below this annual volatility the Sharpe ratio divides by almost zero (e.g. 100% T-bills),
+# producing huge, meaningless values, so we report it as not available instead.
+MIN_VOLATILITY_FOR_SHARPE = 0.01  # 1% per year
+
+
+def sharpe_ratio(expected_return: float, volatility: float, risk_free: float,
+                 min_volatility: float = 0.0) -> float:
     """Sharpe ratio = (mu_p - r_f) / sigma_p : excess return per unit of risk.
 
-    Returns NaN if volatility is zero (the ratio is undefined).
+    Returns NaN ("not available") if volatility is zero or below `min_volatility`.
     """
-    if volatility <= 0:
+    if volatility <= 0 or volatility < min_volatility:
         return float("nan")
     return (expected_return - risk_free) / volatility
 
@@ -259,7 +265,7 @@ def portfolio_summary(returns: pd.DataFrame, weights, risk_free: float, start_va
         "expected_return": exp_ret,
         "volatility": vol,
         "naive_volatility": naive_weighted_volatility(weights, vols),
-        "sharpe": sharpe_ratio(exp_ret, vol, risk_free),
+        "sharpe": sharpe_ratio(exp_ret, vol, risk_free, min_volatility=MIN_VOLATILITY_FOR_SHARPE),
         "cagr": cagr(wealth),
         "max_drawdown": max_drawdown(wealth),
         "wealth": wealth,

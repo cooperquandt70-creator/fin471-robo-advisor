@@ -198,3 +198,24 @@ def test_forward_expected_returns_replaces_only_cash():
     assert fwd["BIL"] == pytest.approx(0.04)
     assert fwd["VTI"] == pytest.approx(0.12)
     assert mu["BIL"] == pytest.approx(0.015)  # original not modified
+
+
+# --- Robustness (M8) ---------------------------------------------------------
+def test_sharpe_na_below_minimum_volatility():
+    # 100% T-bills: ~0.5% volatility would turn a 0.1% excess return into a misleading ratio
+    assert math.isnan(fin.sharpe_ratio(0.025, 0.005, 0.02, min_volatility=fin.MIN_VOLATILITY_FOR_SHARPE))
+    assert fin.sharpe_ratio(0.025, 0.05, 0.02, min_volatility=fin.MIN_VOLATILITY_FOR_SHARPE) == pytest.approx(0.1)
+
+
+def test_portfolio_summary_near_constant_returns_gives_nan_sharpe_not_inf():
+    r = pd.DataFrame({"CASH": [0.0020, 0.0021, 0.0020, 0.0019]})
+    s = fin.portfolio_summary(r, [1.0], risk_free=0.02)
+    assert math.isnan(s["sharpe"])
+    assert s["volatility"] < 0.01
+
+
+def test_monte_carlo_one_year_and_large_start():
+    paths = fin.monte_carlo_paths(0.07, 0.15, years=1, start_value=10_000_000, n_paths=1_000)
+    assert paths.shape == (1_000, 13)
+    bands = fin.percentile_bands(paths).iloc[-1]
+    assert bands["p10"] < 10_000_000 * 1.07 < bands["p90"]

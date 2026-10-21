@@ -298,6 +298,21 @@ def normalize_weights(weights: dict) -> dict:
     return {t: w / total for t, w in weights.items()}
 
 
+def normalize_to_percent(weights: dict, decimals: int = 1) -> dict:
+    """Normalize to percentages rounded to `decimals` that add up to EXACTLY 100.
+
+    Rounding each weight separately can leave 99.9% or 100.1%, so any leftover
+    rounding difference is added to the largest weight.
+    Example: three equal weights -> 33.4 / 33.3 / 33.3.
+    """
+    pct = {t: round(w * 100, decimals) for t, w in normalize_weights(weights).items()}
+    leftover = round(100 - sum(pct.values()), decimals)
+    if leftover:
+        largest = max(pct, key=pct.get)
+        pct[largest] = round(pct[largest] + leftover, decimals)
+    return pct
+
+
 @dataclass
 class Recommendation:
     score: ScoreResult

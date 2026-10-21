@@ -13,6 +13,7 @@ keys (we write our own messages instead of printing raw exception text, which
 can contain the request URL).
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -24,6 +25,10 @@ import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# yfinance logs misleading lines like "possibly delisted" when the network is down;
+# this module reports problems in its own words instead.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 ROOT = Path(__file__).resolve().parent
 SNAPSHOT_PRICES = ROOT / "data" / "snapshot_prices.csv"
@@ -128,10 +133,12 @@ def fetch_prices_yfinance(tickers: list[str], start: str = HISTORY_START) -> pd.
     try:
         raw = yf.download(tickers, start=start, interval="1d", auto_adjust=True,
                           progress=False, threads=True)
-    except Exception:  # yfinance raises many types (rate limit, JSON, network)
-        raise ApiError("yfinance (Yahoo Finance) failed or is rate-limited.") from None
+    except Exception as exc:  # yfinance raises many types (rate limit, JSON, network)
+        if "RateLimit" in type(exc).__name__:  # yfinance.exceptions.YFRateLimitError
+            raise ApiError("Yahoo Finance rate limit reached (too many requests); try again later.") from None
+        raise ApiError("yfinance (Yahoo Finance) failed (network problem or a change on Yahoo's side).") from None
     if raw is None or raw.empty or "Close" not in raw.columns.get_level_values(0):
-        raise ApiError("yfinance (Yahoo Finance) returned no data (possibly rate-limited).")
+        raise ApiError("yfinance (Yahoo Finance) returned no data (network problem or rate limit).")
     closes = raw["Close"]
     if isinstance(closes, pd.Series):  # single ticker
         closes = closes.to_frame(tickers[0])
@@ -174,7 +181,7 @@ def get_prices(tickers: list[str]) -> DataResult:
     try:
         prices = fetch_prices_tiingo(tickers, get_key("TIINGO_API_KEY"))
         _save_cache(prices, CACHE_PRICES)
-        return DataResult(prices, "tiingo", "Live prices from Tiingo (yfinance unavailable).")
+        return DataResult(prices, "tiingo", f"Live prices from Tiingo, because yfinance was unavailable: {problems[0]}")
     except ApiError as e:
         problems.append(str(e))
     try:

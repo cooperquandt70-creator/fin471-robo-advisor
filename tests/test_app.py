@@ -9,6 +9,8 @@ from streamlit.testing.v1 import AppTest
 import data
 
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
+# The real functions, saved before the fixture swaps them out (some tests need them back).
+REAL = {name: getattr(data, name) for name in ("fetch_prices_yfinance", "fetch_prices_tiingo", "fetch_dtb3")}
 
 
 def _offline(*args, **kwargs):
@@ -124,7 +126,10 @@ def test_four_charts_rendered():
 
 
 def money(at, label):
-    return int(metric(at, label).strip("$").replace(",", ""))
+    """Parse '$12,345', '$12.3M' or '$1.23B' back into dollars."""
+    text = metric(at, label).strip("$").replace(",", "")
+    scale = {"M": 1e6, "B": 1e9}.get(text[-1], 1)
+    return float(text.rstrip("MB")) * scale
 
 
 def pct(at, label):
@@ -132,11 +137,11 @@ def pct(at, label):
 
 
 def custom(at, weights_pct):
-    """Turn on manual override and load specific weights into the editor."""
+    """Turn on manual override and type specific weights into the per-ETF number inputs."""
     if not at.toggle(key="override").value:
         at.toggle(key="override").set_value(True).run()
-    at.session_state["custom_pct"] = weights_pct
-    at.session_state["editor_version"] = at.session_state["editor_version"] + 1
+    for t, v in weights_pct.items():
+        at.number_input(key=f"w_{t}").set_value(float(v))
     at.run()
     assert not at.exception, at.exception
     return at
@@ -164,11 +169,14 @@ def test_custom_weights_change_statistics():
     assert pct(at, "Volatility (annual)") > rec_vol  # 100% stocks is riskier than 70/30
 
 
-def test_negative_weight_rejected():
-    at = custom(run_app(), {**ALL_VTI, "VTI": 105.0, "BIL": -5.0})
-    assert any("Negative weights" in e.value and "BIL = -5.0%" in e.value for e in at.error)
-    assert not [m for m in at.metric if m.label == "Volatility (annual)"]  # stats paused
-    assert any("paused" in i.value for i in at.info)
+def test_weight_inputs_cannot_go_negative():
+    # Each input has min 0, so negatives can't even be entered (check_custom_weights also rejects
+    # them; see test_profiles.py). Seven inputs, two columns, step 1.
+    at = run_app()
+    at.toggle(key="override").set_value(True).run()
+    inputs = [at.number_input(key=f"w_{t}") for t in ("VTI", "VXUS", "VNQ", "BND", "BNDX", "TIP", "BIL")]
+    assert all(i.min == 0 and i.max == 100 and i.step == 1 for i in inputs)
+    assert sum(i.value for i in inputs) == pytest.approx(100.0)  # starts from the recommendation
 
 
 def test_weights_not_100_warn_then_normalize():
@@ -179,14 +187,14 @@ def test_weights_not_100_warn_then_normalize():
     at.button(key="normalize").click().run()
     assert not at.exception
     assert not any("not 100%" in w.value for w in at.warning)
-    assert at.session_state["custom_pct"]["VTI"] == pytest.approx(50.0)
+    assert at.number_input(key="w_VTI").value == pytest.approx(50.0)
     assert pct(at, "Volatility (annual)") > 0
 
 
 def test_reset_to_recommended():
     at = custom(run_app(), ALL_VTI)
     at.button(key="reset_weights").click().run()
-    assert at.session_state["custom_pct"]["VTI"] == pytest.approx(42.0)  # Moderate +10 tilt
+    assert at.number_input(key="w_VTI").value == pytest.approx(42.0)  # Moderate +10 tilt
 
 
 def test_conservative_adjustment_applies_to_forward_numbers_only():
@@ -239,3 +247,155 @@ def test_short_horizon_cap_is_explained():
     assert not at.exception
     assert metric(at, "Your profile") == "Conservative"
     assert any("under 3 years" in m.value for m in at.markdown)
+
+
+# ===========================================================================
+# Milestone 8: robustness pass (each test = one row of the README "Testing" table)
+# ===========================================================================
+import json  # noqa: E402
+
+import requests  # noqa: E402
+import yfinance  # noqa: E402
+from yfinance.exceptions import YFRateLimitError  # noqa: E402
+
+ALL_ZERO = {t: 0.0 for t in ALL_VTI}
+
+
+def chart_layout(at, index):
+    """Plotly layout dict of the index-th chart on the page."""
+    return json.loads(at.get("plotly_chart")[index].proto.spec)["layout"]
+
+
+def sidebar_text(at):
+    return " ".join(e.value for e in [*at.sidebar.success, *at.sidebar.warning, *at.sidebar.error])
+
+
+# Case 1 - 100% BIL: near-zero volatility must not produce a huge Sharpe
+def test_all_cash_sharpe_is_na_with_reason():
+    at = custom(run_app(), {**ALL_ZERO, "BIL": 100.0})
+    assert metric(at, "Sharpe ratio") == "n/a"
+    assert pct(at, "Volatility (annual)") < 1.0
+    assert any("Sharpe ratio n/a" in c.value and "below 1%" in c.value for c in at.caption)
+    assert money(at, "Median") > 0  # Monte Carlo still runs
+
+
+# Case 2a - 100% in a single ETF
+@pytest.mark.parametrize("ticker", ["VTI", "VNQ", "BND"])
+def test_single_etf_portfolio(ticker):
+    at = custom(run_app(), {**ALL_ZERO, ticker: 100.0})
+    assert metric(at, "Sharpe ratio") != "n/a"
+    assert any("Diversification:** none here" in m.value for m in at.markdown)
+    assert len(at.get("plotly_chart")) == 4
+
+
+# Case 2b - all weights 0
+def test_all_zero_weights_rejected():
+    at = custom(run_app(), ALL_ZERO)
+    assert any("All weights are zero" in e.value for e in at.error)
+    assert not [m for m in at.metric if m.label == "Volatility (annual)"]
+    assert not any(b.key == "normalize" for b in at.button)  # nothing to normalize
+    assert any("paused" in i.value for i in at.info)
+
+
+# Case 3 - 1-year horizon in the Monte Carlo
+def test_one_year_horizon_monte_carlo():
+    at = run_app(horizon=1)
+    assert any("1-year horizon" in s.value for s in at.subheader)
+    assert any(m.label == "Bad case (10th pct.) in 1 yr" for m in at.metric)
+    p10 = money(at, "Bad case (10th pct.) in 1 yr")
+    assert 0 < p10 < money(at, "Median") < money(at, "Good case (90th pct.)")
+    assert chart_layout(at, 2)["xaxis"]["title"]["text"] == "Years from today"
+
+
+# Case 4a - no .env file (no keys at all)
+def test_no_env_file(monkeypatch):
+    for key in ("FINNHUB_API_KEY", "FRED_API_KEY", "TIINGO_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(data, "fetch_prices_tiingo", REAL["fetch_prices_tiingo"])
+    monkeypatch.setattr(data, "fetch_dtb3", REAL["fetch_dtb3"])
+    at = run_app()
+    text = sidebar_text(at)
+    assert "No TIINGO_API_KEY" in text and "No FRED_API_KEY" in text
+    assert metric(at, "Sharpe ratio") != "n/a"  # still works from the bundled sample
+
+
+class _BadKeyResponse:
+    def __init__(self, url):
+        self.status_code = 400 if "stlouisfed" in url else 401
+        self.ok = False
+
+    def json(self):
+        return {}
+
+
+# Case 4b - bad keys
+def test_bad_keys(monkeypatch):
+    for key in ("FINNHUB_API_KEY", "FRED_API_KEY", "TIINGO_API_KEY"):
+        monkeypatch.setenv(key, "invalid_key_0000")
+    monkeypatch.setattr(data, "fetch_prices_tiingo", REAL["fetch_prices_tiingo"])
+    monkeypatch.setattr(data, "fetch_dtb3", REAL["fetch_dtb3"])
+    monkeypatch.setattr(requests, "get", lambda url, **kw: _BadKeyResponse(url))
+    at = run_app()
+    text = sidebar_text(at)
+    assert "Tiingo rejected the request (HTTP 401)" in text
+    assert "FRED rejected the request (HTTP 400)" in text
+    assert "invalid_key_0000" not in text  # keys never shown
+    assert len(at.get("plotly_chart")) == 4
+
+
+# Case 4c - no network at all
+def test_no_network(monkeypatch):
+    def no_network(*args, **kwargs):
+        raise requests.ConnectionError("network unreachable")
+
+    def yahoo_down(*args, **kwargs):
+        raise OSError("network unreachable")
+
+    monkeypatch.setenv("TIINGO_API_KEY", "some_key")
+    monkeypatch.setenv("FRED_API_KEY", "some_key")
+    for name in REAL:
+        monkeypatch.setattr(data, name, REAL[name])
+    monkeypatch.setattr(requests, "get", no_network)
+    monkeypatch.setattr(yfinance, "download", yahoo_down)
+    at = run_app()
+    text = sidebar_text(at)
+    assert "Could not connect to Tiingo" in text and "Could not connect to FRED" in text
+    assert "educational sample" in text
+    assert len(at.get("plotly_chart")) == 4
+
+
+# Case 4d - yfinance rate-limited: Tiingo takes over (or the sample if Tiingo is unavailable too)
+def test_yfinance_rate_limited_falls_back_to_tiingo(monkeypatch):
+    monkeypatch.setattr(data, "fetch_prices_yfinance", REAL["fetch_prices_yfinance"])
+    monkeypatch.setattr(yfinance, "download", lambda *a, **k: (_ for _ in ()).throw(YFRateLimitError()))
+    monkeypatch.setattr(data, "fetch_prices_tiingo", lambda t, k: data.load_snapshot_prices(t))
+    at = run_app()
+    assert any("Live prices from Tiingo" in s.value and "rate limit" in s.value for s in at.sidebar.success)
+
+
+def test_yfinance_rate_limited_and_no_tiingo_uses_sample(monkeypatch):
+    monkeypatch.setattr(data, "fetch_prices_yfinance", REAL["fetch_prices_yfinance"])
+    monkeypatch.setattr(yfinance, "download", lambda *a, **k: (_ for _ in ()).throw(YFRateLimitError()))
+    at = run_app()
+    assert any("educational sample" in w.value and "rate limit" in w.value for w in at.sidebar.warning)
+    assert len(at.get("plotly_chart")) == 4
+
+
+# Case 5 - $0 monthly contribution and a $10,000,000 starting amount: readable axes
+def test_large_starting_amount_axis_in_millions():
+    at = run_app()
+    at.number_input(key="contribution").set_value(0).run()
+    at.number_input(key="start_amount").set_value(10_000_000).run()
+    assert not at.exception
+    layout = chart_layout(at, 2)
+    assert "millions" in layout["yaxis"]["title"]["text"]
+    assert layout["yaxis"]["ticksuffix"] == "M"
+    assert money(at, "Median") > 10_000_000
+    # Compact "$208.1M" instead of "$208,092,513", which got cut off to "$208,092..." in narrow columns
+    assert all(metric(at, k).endswith("M") for k in ("Median", "Good case (90th pct.)"))
+
+
+def test_default_amount_axis_in_dollars():
+    layout = chart_layout(run_app(), 2)
+    assert layout["yaxis"]["title"]["text"] == "Portfolio value ($, nominal)"
+    assert layout["yaxis"].get("ticksuffix", "") == ""

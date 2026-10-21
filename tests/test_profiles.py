@@ -202,3 +202,13 @@ def test_missing_answer_raises():
 def test_explanation_mentions_score_and_cap():
     text = pr.explain(pr.score(2, HIGHEST))
     assert "20 out of 30" in text and "Conservative" in text
+
+
+def test_normalize_to_percent_sums_to_exactly_100():
+    assert sum(pr.normalize_to_percent({"A": 1, "B": 1, "C": 1}).values()) == pytest.approx(100.0, abs=1e-9)
+    assert pr.normalize_to_percent({"A": 1, "B": 1, "C": 1}) == {"A": 33.4, "B": 33.3, "C": 33.3}
+    w = pr.normalize_to_percent({"VTI": 100, "VXUS": 21, "BND": 37})  # total 158
+    assert w["VTI"] == pytest.approx(63.3) and sum(w.values()) == pytest.approx(100.0, abs=1e-9)
+    for profile in pr.PROFILES:  # rounded recommendations never trip the sum warning
+        rec = pr.apply_tilt(pr.BASE_ALLOCATIONS[profile], pr.horizon_tilt(5))
+        assert pr.check_custom_weights(pr.normalize_to_percent(rec))[0] == "ok"
