@@ -251,3 +251,22 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
 - **Browser check:** the two-column inputs and the $10M Monte Carlo ($0M–$500M axis; $92.1M / $208.1M / $485.8M metrics). Fixed the label "BIL (Cash-like (T-bills)), %" → "BIL (%) – Cash-like (T-bills)".
 - **Tests:** 18 new; total 254 pass, including one test per robustness case.
 - **`README.md` draft:** quick start plus a **Testing** section with the robustness table.
+
+### 13. Milestone 9 — Finnhub quotes, final in-app docs, README, screenshots
+**I asked:**
+1. A Finnhub live quote panel: price and daily % change for each ETF in the current allocation, cached 60 s, with a timestamp. A short message if Finnhub fails or the key is missing, and the app keeps working. Add a test.
+2. A README covering every assignment requirement, including the Streamlit first-run email prompt.
+3. Include the yfinance vs Tiingo cross-check, the 0.1118 vs 0.15 example and the volatility-drag explanation.
+4. In "How the AI coding agent was used", a factual list of milestones and fixes, plus a marked placeholder paragraph for me to write myself (the agent must not write it).
+5. Regenerate the screenshots.
+
+**Agent did:**
+- **`data.py`:** `QUOTE_TTL_SECONDS = 60` on `cached_quotes`; `DataResult.fetched_at` records when quotes were downloaded.
+- **`app.py` quote panel:** "Live market quotes (Finnhub)" under the allocation lists only ETFs with a weight above 0, showing price, day change % and last trade in ET, plus a "Fetched … ET; refreshed at most every 60 seconds" caption. A missing key or a Finnhub error shows a one-line message, and the panel is wrapped so a quote problem can never break the page.
+- **`app.py` in-app docs:** completed Methodology (profile, allocation and tilt, data sources, Sharpe n/a rule, volatility drag, override) and Limitations (no costs/taxes, simplified questionnaire, data caveats).
+- **Tests (258 pass):** the offline fixture now also blocks Finnhub. Four quote tests: price, change and ET timestamp with the 60 s note; only held ETFs listed; missing key → message and app works; rejected key → message, no key shown, app works.
+- **Mistake in my own test:** the new timestamp test initially failed. The *test* constant was wrong (it was 00:00 UTC on Oct 21 = 20:00 ET); the app's UTC→ET conversion was correct. Fixed the constant.
+- **Live browser check:** real Finnhub quotes for all 7 ETFs, last trade "Oct 20, 16:00" ET.
+- **Screenshots:** `take_screenshots.py` now also captures `live_quotes.png`, and the crop was widened after the first capture cut off the caption. All screenshots regenerated.
+- **`README.md`:** full rewrite covering purpose, features, screenshots, install/run (venv, Windows and macOS/Linux commands, keys table, the "Email:" prompt), APIs and free-tier notes with links, the cross-check, allocations, scoring and tilt, formulas (with the 0.1118 example and volatility drag), project structure, testing, AI usage (factual list plus a TODO placeholder for me), and limitations/incomplete features.
+- **Caught while writing the README:** the pinned numpy 2.5.4 requires Python ≥ 3.12 (pandas and streamlit need ≥ 3.11). The draft said "3.10+"; corrected to 3.12+, with the pip error to expect.

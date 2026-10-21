@@ -1,4 +1,4 @@
-"""Smoke tests that run the real Streamlit script headlessly (streamlit.testing.AppTest)."""
+﻿"""Smoke tests that run the real Streamlit script headlessly (streamlit.testing.AppTest)."""
 
 from pathlib import Path
 
@@ -11,6 +11,7 @@ import data
 APP = str(Path(__file__).resolve().parent.parent / "app.py")
 # The real functions, saved before the fixture swaps them out (some tests need them back).
 REAL = {name: getattr(data, name) for name in ("fetch_prices_yfinance", "fetch_prices_tiingo", "fetch_dtb3")}
+REAL_FETCH_QUOTE = data.fetch_quote
 
 
 def _offline(*args, **kwargs):
@@ -23,6 +24,7 @@ def offline_data(monkeypatch, tmp_path):
     monkeypatch.setattr(data, "fetch_prices_yfinance", _offline)
     monkeypatch.setattr(data, "fetch_prices_tiingo", _offline)
     monkeypatch.setattr(data, "fetch_dtb3", _offline)
+    monkeypatch.setattr(data, "fetch_quote", _offline)  # never call Finnhub from tests
     monkeypatch.setattr(data, "CACHE_PRICES", tmp_path / "prices.csv")  # ignore any local cache
     monkeypatch.setattr(data, "CACHE_DTB3", tmp_path / "dtb3.csv")
     st.cache_data.clear()
@@ -399,3 +401,59 @@ def test_default_amount_axis_in_dollars():
     layout = chart_layout(run_app(), 2)
     assert layout["yaxis"]["title"]["text"] == "Portfolio value ($, nominal)"
     assert layout["yaxis"].get("ticksuffix", "") == ""
+
+
+# ===========================================================================
+# Milestone 9: Finnhub live quote panel
+# ===========================================================================
+FAKE_QUOTE_TIME = 1792526400  # 2026-10-20 20:00 UTC = 16:00 ET (market close)
+
+
+def _fake_quote(symbol, key):
+    price = {"VTI": 377.50, "VXUS": 71.20, "BND": 72.10}.get(symbol, 50.0)
+    return {"c": price, "d": 1.0, "dp": 0.52, "pc": price - 1.0, "t": FAKE_QUOTE_TIME}
+
+
+def quote_table(at):
+    return next((d.value for d in at.dataframe if "Day change %" in d.value.columns), None)
+
+
+def test_quote_panel_shows_price_change_and_timestamp(monkeypatch):
+    monkeypatch.setenv("FINNHUB_API_KEY", "test_key")
+    monkeypatch.setattr(data, "fetch_quote", _fake_quote)
+    at = run_app()
+    table = quote_table(at)
+    assert table is not None
+    assert list(table["Ticker"]) == ["VTI", "VXUS", "VNQ", "BND", "BNDX", "TIP", "BIL"]
+    assert table.set_index("Ticker").loc["VTI", "Price"] == pytest.approx(377.50)
+    assert table.set_index("Ticker").loc["VTI", "Day change %"] == pytest.approx(0.52)
+    assert table.set_index("Ticker").loc["VTI", "Last trade (ET)"] == "Oct 20, 16:00"
+    assert any("Fetched" in c.value and "every 60 seconds" in c.value for c in at.caption)
+    assert data.QUOTE_TTL_SECONDS == 60
+
+
+def test_quote_panel_only_lists_etfs_in_current_allocation(monkeypatch):
+    monkeypatch.setenv("FINNHUB_API_KEY", "test_key")
+    monkeypatch.setattr(data, "fetch_quote", _fake_quote)
+    at = custom(run_app(), {**ALL_ZERO, "VTI": 60.0, "BND": 40.0})
+    assert list(quote_table(at)["Ticker"]) == ["VTI", "BND"]
+
+
+def test_quote_panel_missing_key_shows_message_and_app_works(monkeypatch):
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    at = run_app()
+    assert quote_table(at) is None
+    assert any("add FINNHUB_API_KEY" in c.value and "works without quotes" in c.value for c in at.caption)
+    assert len(at.get("plotly_chart")) == 4
+
+
+def test_quote_panel_finnhub_failure_shows_message_and_app_works(monkeypatch):
+    monkeypatch.setenv("FINNHUB_API_KEY", "invalid_key_0000")
+    monkeypatch.setattr(data, "fetch_quote", REAL_FETCH_QUOTE)
+    monkeypatch.setattr(requests, "get", lambda url, **kw: _BadKeyResponse(url))  # HTTP 401
+    at = run_app()
+    assert quote_table(at) is None
+    assert any("Finnhub rejected the request (HTTP 401)" in c.value for c in at.caption)
+    assert not any("invalid_key_0000" in c.value for c in at.caption)
+    assert metric(at, "Sharpe ratio") != "n/a"
+    assert len(at.get("plotly_chart")) == 4

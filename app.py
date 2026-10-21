@@ -49,21 +49,37 @@ def adjustment_summary() -> str:
             f"cash ({_tickers_of('cash')}) unchanged")
 
 
-# Shown in the "Methodology & Assumptions" section (finalized in milestone 9).
+# Shown in the "Methodology & Assumptions" section.
 METHODOLOGY = [
-    "**Data:** month-end dividend-adjusted prices (total returns) for 7 ETFs; monthly return "
-    "r_t = P_t / P_(t-1) - 1. Only months where all 7 ETFs have data are used.",
+    "**Profile:** score = horizon points (0-10) + five risk questions (0-4 each) = 0-30. "
+    "0-12 Conservative, 13-21 Moderate, 22-30 Aggressive. A horizon under 3 years forces Conservative; "
+    "3-5 years caps the profile at Moderate.",
+    "**Allocation:** each profile has a fixed base mix of 7 ETFs. The horizon then tilts it by "
+    "(horizon - 10 years) x 1 percentage point, capped at ±10, between the growth sleeve (stocks, REITs) "
+    "and the defensive sleeve (bonds, cash). The score picks the profile; the tilt fine-tunes within it, "
+    "and the cap means a tilt can never move a portfolio into another profile's range.",
+    "**Data sources:** prices from Yahoo Finance via yfinance (fallbacks: Tiingo, the last saved copy, "
+    "then a bundled educational sample); 3-month T-bill rate from FRED (series DTB3); live quotes "
+    "from Finnhub (context only). The sidebar shows which source is in use.",
+    "**Returns:** month-end dividend-adjusted prices (total returns) for 7 ETFs; monthly return "
+    "r_t = P_t / P_(t-1) - 1. Only months where all 7 ETFs have data are used. The default lookback "
+    "is 10 years (120 months); 5 years and the maximum common history (from mid-2013) are selectable.",
     "**Expected return:** mu_i = 12 x average monthly return (arithmetic); portfolio mu_p = w^T mu.",
     "**Volatility:** annualized covariance matrix Sigma = 12 x monthly sample covariance; "
     "sigma_p = sqrt(w^T Sigma w). This includes correlations, so it is lower than the weighted "
     "average of the ETFs' volatilities.",
     "**Sharpe ratio:** (mu_p - r_f) / sigma_p, where r_f is the average 3-month T-bill rate (FRED DTB3) "
-    "over the same lookback window.",
+    "over the same lookback window. Shown as n/a when volatility is below 1% (e.g. 100% T-bills), "
+    "because dividing by almost zero gives a meaningless number.",
     "**Backtest:** $10,000 rebalanced monthly to the target weights, using actual historical returns. "
     "CAGR = (W_end / W_start)^(1/years) - 1; max drawdown = worst fall from a running peak.",
     "**Monte Carlo:** 5,000 paths of normally distributed monthly returns with mean mu_p/12 and "
-    "volatility sigma_p/sqrt(12), fixed seed 42, showing 10th/50th/90th percentiles. Cash (BIL) uses "
-    "today's T-bill rate as its expected return.",
+    "volatility sigma_p/sqrt(12), fixed seed 42, showing 10th/50th/90th percentiles over your horizon. "
+    "Cash (BIL) uses today's T-bill rate as its expected return. The median grows at about "
+    "exp(mu_p - sigma_p^2/2) - 1 per year, below the arithmetic mu_p: this \"volatility drag\" is why "
+    "compounding volatile returns grows money more slowly than the average return suggests.",
+    "**Manual override:** custom weights must be 0% or more and total 100%; the portfolio is then "
+    "labelled *Custom* and every statistic and chart uses it.",
     "**Return assumptions:** *Historical (default)* uses the lookback averages as they are. "
     f"*Conservative adjustment* lowers expected returns: {adjustment_summary()}. It applies to the "
     "expected return, Sharpe ratio, risk/return chart and Monte Carlo, but **not** to the historical "
@@ -81,6 +97,13 @@ LIMITATIONS = [
     "**The Monte Carlo assumes normal, independent monthly returns** with the historical mean and "
     "covariance. Real markets have fatter tails (crashes are more likely than a normal curve predicts), "
     "and future averages may differ from the past decade's.",
+    "**No costs or taxes.** ETF expense ratios, trading costs, taxes and account types (401(k), IRA, "
+    "taxable) are ignored.",
+    "**A simplified questionnaire.** Five questions and a horizon are not a regulatory suitability "
+    "assessment; real advisors also consider income, debts, goals and liquidity needs.",
+    "**Data caveats.** yfinance is an unofficial Yahoo Finance scraper; the bundled sample can be out "
+    "of date; DTB3 is quoted on a discount basis, slightly below a bond-equivalent yield; live quotes "
+    "show the last trade and are not used in any calculation.",
 ]
 
 
@@ -304,6 +327,35 @@ def show_allocation(rec: pr.Recommendation, weights: dict, label: str) -> None:
         fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), showlegend=False,
                           annotations=[dict(text=label, showarrow=False, font_size=16)])
         st.plotly_chart(fig, width="stretch")
+
+
+def show_quotes(weights: dict) -> None:
+    """Live Finnhub quotes for the ETFs in the current allocation. Never blocks the rest of the page."""
+    st.markdown("**Live market quotes (Finnhub)**")
+    held = tuple(t for t in pr.TICKERS if weights.get(t, 0) > 0.0005)
+    try:
+        result = data.cached_quotes(held)
+    except Exception:  # defensive: a quote problem must never break the page
+        result = data.DataResult(None, "error", "Live quotes unavailable right now.")
+    if result.data is None:
+        st.caption(f"ℹ️ {result.message} The rest of the app works without quotes.")
+        return
+
+    quotes = result.data.reset_index()
+    as_of = pd.to_datetime(quotes["As of"]).dt.tz_localize("UTC").dt.tz_convert("America/New_York")
+    table = pd.DataFrame({
+        "Ticker": quotes["Ticker"],
+        "Price": quotes["Price"],
+        "Day change %": quotes["Change %"],
+        "Last trade (ET)": as_of.dt.strftime("%b %d, %H:%M"),
+    })
+    st.dataframe(table, hide_index=True, width="content",
+                 column_config={"Price": st.column_config.NumberColumn(format="$%.2f"),
+                                "Day change %": st.column_config.NumberColumn(format="%+.2f%%")})
+    fetched = result.fetched_at.tz_convert("America/New_York").strftime("%b %d, %Y %H:%M:%S ET")
+    extra = f" {result.message.replace('Live quotes from Finnhub.', '').strip()}" if "unavailable" in result.message else ""
+    st.caption(f"Fetched {fetched}; refreshed at most every {data.QUOTE_TTL_SECONDS} seconds. "
+               f"Quotes are for context only; the statistics below use monthly historical data.{extra}")
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +622,7 @@ def main() -> None:
     weights, label = choose_weights(rec)
     if weights is not None:
         show_allocation(rec, weights, label)
+        show_quotes(weights)
     st.divider()
     show_analysis(weights, label, int(rec.score.horizon_years), settings)
 

@@ -50,6 +50,7 @@ class DataResult:
     data: object        # DataFrame / Series / None
     source: str         # "live", "tiingo", "cache", "snapshot" or "error"
     message: str = ""   # human-readable status for the UI
+    fetched_at: pd.Timestamp | None = None  # when live data was downloaded (UTC)
 
 
 class ApiError(Exception):
@@ -278,7 +279,7 @@ def get_quotes(tickers: list[str]) -> DataResult:
     if not rows:
         return DataResult(None, "error", "Live quotes unavailable. " + (failures[0] if failures else ""))
     msg = "Live quotes from Finnhub." + (f" Some quotes unavailable: {failures[0]}" if failures else "")
-    return DataResult(pd.DataFrame(rows).set_index("Ticker"), "live", msg)
+    return DataResult(pd.DataFrame(rows).set_index("Ticker"), "live", msg, fetched_at=pd.Timestamp.now(tz="UTC"))
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +295,9 @@ def cached_risk_free() -> DataResult:
     return get_risk_free()
 
 
-@st.cache_data(ttl=300, show_spinner="Loading live quotes...")
+QUOTE_TTL_SECONDS = 60  # quotes are re-fetched at most once a minute (free tier: 60 calls/min)
+
+
+@st.cache_data(ttl=QUOTE_TTL_SECONDS, show_spinner="Loading live quotes...")
 def cached_quotes(tickers: tuple[str, ...]) -> DataResult:
     return get_quotes(list(tickers))

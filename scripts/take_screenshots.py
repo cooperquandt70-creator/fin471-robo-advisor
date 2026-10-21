@@ -26,7 +26,7 @@ VIEWPORT = {"width": 1440, "height": 1000}
 # Each preset: filename prefix and the inputs to set. Answers left alone stay at
 # the default middle option ("Hold and wait", "Balance growth and stability", ...).
 PRESETS = [
-    {"name": "age25", "age": 25},
+    {"name": "age25", "age": 25, "quotes": True},  # quotes are the same 7 ETFs for both, so capture once
     {"name": "age60", "age": 60},
 ]
 # Charts in page order (index of st.plotly_chart on the page).
@@ -89,7 +89,29 @@ def capture(page: Page, preset: dict) -> list[Path]:
         path = OUT / f"{preset['name']}_{label}.png"
         chart.screenshot(path=path)
         saved.append(path)
+
+    if preset.get("quotes"):
+        saved.extend(capture_quotes(page))
     return saved
+
+
+def capture_quotes(page: Page) -> list[Path]:
+    """Crop from the 'Live market quotes' heading down to its 'Fetched ...' caption."""
+    heading = page.get_by_text("Live market quotes (Finnhub)", exact=True)
+    if heading.count() == 0:
+        print("Quote panel not shown (no FINNHUB_API_KEY?) - skipped quotes screenshot.")
+        return []
+    heading.scroll_into_view_if_needed()
+    page.wait_for_timeout(300)
+    top = heading.bounding_box()
+    caption = page.get_by_text("Fetched", exact=False).first.bounding_box()
+    if not top or not caption:
+        return []
+    path = OUT / "live_quotes.png"
+    width = max(720, caption["x"] + caption["width"] - top["x"] + 32)  # wide enough for the caption
+    page.screenshot(path=path, clip={"x": top["x"] - 16, "y": top["y"] - 16, "width": width,
+                                     "height": caption["y"] + caption["height"] - top["y"] + 32})
+    return [path]
 
 
 def main() -> None:
