@@ -98,13 +98,16 @@ def capture(page: Page, preset: dict) -> list[Path]:
 def capture_quotes(page: Page) -> list[Path]:
     """Crop from the 'Live market quotes' heading down to its 'Fetched ...' caption."""
     heading = page.get_by_text("Live market quotes (Finnhub)", exact=True)
-    if heading.count() == 0:
-        print("Quote panel not shown (no FINNHUB_API_KEY?) - skipped quotes screenshot.")
+    fetched = page.get_by_text("Fetched", exact=False)
+    # The heading is always shown; the "Fetched ..." caption only appears when quotes actually loaded
+    # (without FINNHUB_API_KEY the panel shows a one-line message instead).
+    if heading.count() == 0 or fetched.count() == 0:
+        print("No live quotes (FINNHUB_API_KEY missing or Finnhub unavailable) - skipped live_quotes.png.")
         return []
     heading.scroll_into_view_if_needed()
     page.wait_for_timeout(300)
     top = heading.bounding_box()
-    caption = page.get_by_text("Fetched", exact=False).first.bounding_box()
+    caption = fetched.first.bounding_box()
     if not top or not caption:
         return []
     path = OUT / "live_quotes.png"

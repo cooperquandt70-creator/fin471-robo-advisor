@@ -300,3 +300,16 @@ Running log of what I (the student) asked the AI coding agent (Claude Code, mode
   - The README now lists the tested Python versions (3.12.10, 3.13.16, 3.14.8) and the exact pip error to expect on older Python.
 - **Cleanup:** deleted the copy of my `.env` used for the with-keys clone test.
 - The README's AI-usage TODO block is untouched, for me to write.
+
+### 15. Wrap-up — my reflection, final audit, v1.0
+**I did myself:** wrote the README's "How the AI coding agent was used" reflection paragraph in my own words, replacing the agent's TODO placeholder, and committed and pushed it (`d89b793`). The agent did not draft, edit or review that paragraph's wording.
+
+**I asked:** pull to confirm local matches GitHub; audit the public repo against every assignment GitHub requirement and minimum functional requirement; check every README image link and command on GitHub; add this entry; mark the plan complete; commit, push and tag v1.0, without editing my paragraph.
+
+**Agent did:**
+- **Pull:** already up to date. Local `main` = GitHub `main` = `d89b793`, working tree clean.
+- **README links, checked as served by GitHub:** all 7 image links return HTTP 200 PNGs; all 11 table-of-contents anchors match real headings; `docs/PLAN.md`, `docs/AI_USAGE.md` and `finance.py` resolve. All external links load: Tiingo and Alpha Vantage block scripted HEAD requests (403) but load normally.
+- **README commands, in a fresh clone of `d89b793`:** every Windows command run in order and as written. `git clone`, `python -m venv` (Python 3.14.8), `Activate.ps1`, `pip install -r requirements.txt`, `copy .env.example .env`, `streamlit run app.py` (server healthy), `check_apis.py` (SKIPs without keys), `check_apis.py --bad-key` (clear FAILs), `python -m pytest` (258 passed), `pip install -r requirements-dev.txt` and `playwright install chromium` all succeeded.
+- **Bug found:** `python scripts/take_screenshots.py` **crashed** after a 30 s timeout in a clone with no keys. The quote-panel heading is always shown, but the "Fetched …" caption only appears when quotes load, and the script checked the heading. Fixed by checking for the caption; re-tested without keys (all images except `live_quotes.png`, exit 0) and with keys (`live_quotes.png` saved). The README now notes that image needs a Finnhub key.
+- **Requirements audit:** every assignment GitHub requirement and minimum functional requirement passes. Also checked: no literal API keys anywhere in the Python code.
+- Marked the plan **COMPLETE** in `docs/PLAN.md` and tagged the release **v1.0**.

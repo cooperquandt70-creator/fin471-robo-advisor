@@ -163,7 +163,9 @@ python -m pytest                          # 258 offline tests, about 15 seconds
 ```
 
 To regenerate the screenshots: `pip install -r requirements-dev.txt`, then
-`python -m playwright install chromium`, then `python scripts/take_screenshots.py`.
+`python -m playwright install chromium`, then `python scripts/take_screenshots.py`. The
+`live_quotes.png` image needs a `FINNHUB_API_KEY`; without one it is skipped and the other images are
+still created.
 
 ## APIs and datasets
 

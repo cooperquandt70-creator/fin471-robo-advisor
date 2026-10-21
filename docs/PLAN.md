@@ -134,6 +134,9 @@ fin471-robo-advisor/
   5. Fix every README gap the fresh clone exposes, push again, and log everything in `docs/AI_USAGE.md`. The README's AI-usage TODO block stays for the user to write.
   - **Status (2026-10-20): done.** All 13 commits use the noreply email (checked on GitHub). Fresh clones on Python 3.12, 3.13 and 3.14 installed every pinned package with no pin changes, passed 258 tests, and ran the app. Gaps fixed: `check_apis.py` now reports SKIP for missing optional keys, and the README lists the Python versions tested.
 
+### Plan status: COMPLETE (2026-10-20)
+All milestones M0–M10 are done. Final audit: every assignment GitHub requirement and minimum functional requirement passes (see `docs/AI_USAGE.md`, final entry). Released as tag **v1.0** on https://github.com/cooperquandt70-creator/fin471-robo-advisor.
+
 ## Remaining risks and open items
 - **Snapshot CSV (approved):** commit `data/snapshot_prices.csv`, labeled "educational sample" in its header comment, in the README and in the UI badge. Also commit `scripts/build_snapshot.py`, which regenerates it from yfinance.
 - **yfinance breakage:** Yahoo changes can break it at any time. The fallbacks cover this, but your demo should be rehearsed with a warm cache.
