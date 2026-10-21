@@ -433,10 +433,7 @@ milestones that I reviewed, tested and approved one at a time. The full request-
   `.env.*` ignore rule. Keys never appear in error messages, and Finnhub and Tiingo keys are sent in
   request headers rather than URLs.
 
-> ✏️ **TODO (student): replace this block with a paragraph in your own words before submitting.**
-> Suggested points (delete this line): what you decided yourself versus what the agent proposed, how
-> you checked its work, and what you learned or would do differently.
-
+> I used Claude Code to build this app, but I had it plan first instead of writing code right away. The first thing I had it do was check which free APIs actually worked, and that is how I found out Finnhub's historical prices and ETF data are premium-only, so prices come from yfinance and Finnhub is used for live quotes. I didn't approve the plan until it showed that portfolio volatility used the covariance matrix and not a weighted average, and I had it write a test proving a 50/50 mix of two uncorrelated assets with 20% and 10% volatility comes out to 11.18%, not 15%. When I used the app myself, a few things didn't make sense from a finance point of view. It treated "years until 65" as the investment horizon even though people keep investing in retirement, and the 40-year projection of about $320,000 was just the last ten years of strong US returns extended forward, so I added a conservative return assumption to show how much the projection depends on that. The tests also caught problems I wouldn't have noticed, like a chart that crashed and five bugs found when I ran the app with no internet and bad API keys. The main thing I learned is that the AI writes working code fast, but it does not question the finance assumptions unless I do.
 ## Known limitations and incomplete features
 
 **Limitations** (also shown in the app):
